@@ -1,8 +1,15 @@
+from __future__ import annotations
+
+import uuid
+
+import structlog.contextvars
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from memory_with_receipts.api.routes.health import router as health_router
+from memory_with_receipts.api.routes.operational_memory import router as operational_memory_router
 from memory_with_receipts.core.config import Settings
 from memory_with_receipts.core.logging import configure_logging, get_logger
 
@@ -10,21 +17,38 @@ logger = get_logger(__name__)
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """Small request logger. Keep it boring and useful."""
+    """Small request logger with correlation IDs. Keep it boring and useful."""
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        correlation_id = request.headers.get("x-correlation-id") or str(uuid.uuid4())
+        request.state.correlation_id = correlation_id
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(correlation_id=correlation_id)
         logger.info(
             "request_started",
+            correlation_id=correlation_id,
             method=request.method,
             path=request.url.path,
         )
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception:
+            logger.exception(
+                "request_failed",
+                correlation_id=correlation_id,
+                method=request.method,
+                path=request.url.path,
+            )
+            raise
+        response.headers["x-correlation-id"] = correlation_id
         logger.info(
             "request_finished",
+            correlation_id=correlation_id,
             method=request.method,
             path=request.url.path,
             status_code=response.status_code,
         )
+        structlog.contextvars.clear_contextvars()
         return response
 
 
@@ -44,10 +68,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = app_settings
     app.add_middleware(RequestLoggingMiddleware)
     app.include_router(health_router)
+    app.include_router(operational_memory_router)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        correlation_id = getattr(request.state, "correlation_id", str(uuid.uuid4()))
+        logger.warning(
+            "request_validation_failed",
+            correlation_id=correlation_id,
+            path=request.url.path,
+            errors=exc.errors(),
+        )
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": {
+                    "error": "request_validation_failed",
+                    "correlation_id": correlation_id,
+                    "fields": exc.errors(),
+                }
+            },
+            headers={"x-correlation-id": correlation_id},
+        )
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-        logger.exception("unhandled_exception", path=request.url.path, error=str(exc))
-        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+        correlation_id = getattr(request.state, "correlation_id", str(uuid.uuid4()))
+        logger.exception(
+            "unhandled_exception",
+            correlation_id=correlation_id,
+            path=request.url.path,
+            error=str(exc),
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": {
+                    "error": "internal_server_error",
+                    "message": "Internal server error",
+                    "correlation_id": correlation_id,
+                }
+            },
+            headers={"x-correlation-id": correlation_id},
+        )
 
     return app

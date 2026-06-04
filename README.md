@@ -1,52 +1,69 @@
-# Memory With Receipts
+# Production-Grade RAG System with Receipts
 
-A production-style RAG/memory system where every recalled memory can show its receipts:
+A production-grade RAG (Retrieval-Augmented Generation) system where every answer includes traceable receipts:
 
-- original source
-- timestamp
-- confidence
-- contradiction status
-- recency/freshness
-- retrieval explanation
-- verification metadata
+- source provenance (where evidence came from)
+- retrieval reasoning (why this evidence was selected)
+- freshness metadata (when it was captured, recency score)
+- confidence and contradiction status
+- evaluation-backed reliability
 
-This is intentionally **not** a generic vector search demo. The goal is to learn AI reliability engineering through a small but professional system.
+This is intentionally **not** a generic vector search demo. The goal is a system where every factual answer must include receipts. If reliable receipts are unavailable, the system returns an insufficient-evidence response instead of guessing.
+
+## Architecture
+
+Two first-class verticals:
+
+1. **Operational memory** — database alarms, replication lag, failover events with deterministic evidence extraction and provenance receipts
+2. **Document RAG** — multi-source document ingestion, hybrid retrieval, LLM generation with inline citations and source receipts
+
+Both share the core receipt identity: every answer is traceable to specific sources, chunks, and evidence.
 
 ## Current status
 
-Foundation initialized:
+Foundation and operational memory vertical complete:
 
-- Python + uv
-- FastAPI app factory
-- Pydantic settings
-- structured logging
-- SQLAlchemy async DB foundation
-- initial memory/evidence schema concepts
-- retrieval scoring utility
-- pytest + Ruff
-- architecture docs and roadmap
+- Python 3.11 + uv
+- FastAPI app factory with structured logging and correlation IDs
+- SQLAlchemy async DB foundation (PostgreSQL + pgvector)
+- Operational memory ingestion with deterministic evidence extraction
+- Operational memory retrieval with explainable scoring and provenance receipts
+- Idempotent event ingestion with source deduplication
+- Docker Compose for local PostgreSQL + pgvector
+- pytest + Ruff + pytest-cov
+- Architecture docs and phased roadmap
 
 ## Project location
 
 Windows path:
 
 ```text
-D:gentic_ai\memory-with-receipts
+D:\agentic_ai\prod_rag_with_receipts
 ```
 
 WSL path:
 
 ```text
-/mnt/d/agentic_ai/memory-with-receipts
+/mnt/d/agentic_ai/prod_rag_with_receipts
 ```
 
 ## Quickstart
 
 ```bash
-cd /mnt/d/agentic_ai/memory-with-receipts
+# Start PostgreSQL + pgvector
+docker compose up -d
+
+# Install dependencies
+cd /mnt/d/agentic_ai/prod_rag_with_receipts
 uv sync
-uv run pytest
+
+# Run tests
+uv run python -m pytest -q
+
+# Run linter
 uv run ruff check .
+
+# Start dev server
 uv run uvicorn memory_with_receipts.api.app:create_app --factory --reload
 ```
 
@@ -56,15 +73,29 @@ Then open:
 http://127.0.0.1:8000/health
 ```
 
+## API endpoints
+
+### Operational memory
+
+- `POST /operational-memory/events` — ingest structured operational events
+- `POST /operational-memory/retrieval` — retrieve operational memories with receipts
+
+### RAG pipeline (planned)
+
+- `POST /v1/ingest` — ingest documents (text, markdown, PDF, web)
+- `POST /v1/search` — hybrid retrieval with receipts
+- `POST /v1/ask` — RAG generation with inline citations
+- `POST /v1/eval/run` — run evaluation suite
+
 ## Documentation
 
-- `docs/ARCHITECTURE.md` - architecture, tradeoffs, MVP scope, schema concepts, pipelines
-- `docs/ROADMAP.md` - staged implementation plan
-- `docs/DEVELOPMENT_RULES.md` - engineering discipline and AI-assisted coding rules
-- `docs/FAILURE_MODES.md` - early reliability risks
+- `docs/ARCHITECTURE.md` — architecture, tradeoffs, component design
+- `docs/ROADMAP.md` — phased implementation plan
+- `docs/DEVELOPMENT_RULES.md` — engineering discipline and AI-assisted coding rules
+- `docs/FAILURE_MODES.md` — reliability risks and controls
 
-## Initial philosophy
+## Philosophy
 
 Keep it small. Make it correct. Make it explainable.
 
-Do not add microservices, complex queues, Kubernetes, or autonomous ingestion until the core memory/retrieval behavior is trustworthy and tested.
+Every answer has receipts. If it cannot show receipts, it does not answer.

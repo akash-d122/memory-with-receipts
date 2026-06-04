@@ -5,3 +5,9 @@ __pycache__/
 .env
 *.pyc
 .DS_Store
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
+implementation_plan.md

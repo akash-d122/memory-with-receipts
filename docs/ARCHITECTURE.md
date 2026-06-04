@@ -1,22 +1,24 @@
-# Memory With Receipts Architecture
+# Production-Grade RAG System with Receipts — Architecture
 
 ## Goal
 
-Build a small, production-style RAG/memory system where every recalled fact can be traced back to evidence. The first version should teach systems thinking: data modeling, retrieval quality, contradiction handling, observability, and failure analysis.
+Build a production-grade RAG system where every answer includes traceable receipts: source provenance, retrieval reasoning, freshness metadata, and evaluation-backed reliability. The system has two first-class verticals: operational memory (database events) and document RAG (text, markdown, PDF, web).
 
 ## Architectural thesis
 
 Generic RAG often fails because it returns text chunks without enough accountability. This project treats memory as an operational system, not just a vector search demo.
 
-A memory answer should expose:
+Every factual answer must include receipts. If the system cannot attach reliable receipts, it must return an insufficient-evidence response instead of guessing.
 
-- what was recalled
-- where it came from
-- when it was captured
-- how confident the system is
-- whether newer or conflicting evidence exists
-- why this evidence was selected
-- what verification metadata exists
+A receipt includes:
+
+- what was recalled (quoted evidence)
+- where it came from (source ID, title, URI)
+- when it was captured (timestamps, freshness)
+- how confident the system is (confidence, trust score)
+- whether newer or conflicting evidence exists (status: active/stale/contradicted)
+- why this evidence was selected (retrieval score, reason codes)
+- what verification metadata exists (embedding model, extraction method)
 
 ## High-level components
 
@@ -26,27 +28,32 @@ Client / CLI / API caller
         v
 FastAPI boundary
         |
-        +--> Ingestion service
-        |       +--> source normalization
-        |       +--> chunking / fact extraction later
-        |       +--> source + evidence persistence
-        |
-        +--> Retrieval service
-        |       +--> candidate search
-        |       +--> recency/confidence scoring
-        |       +--> contradiction filtering
-        |       +--> explanation building
-        |
-        +--> Evaluation utilities
-                +--> golden questions
-                +--> expected evidence checks
-                +--> regression tracking
+        +-- Operational memory vertical        +-- Document RAG vertical
+        |     +-> event ingestion               |     +-> document ingestion
+        |     +-> deterministic evidence        |     |     +-> parsers (text/md/pdf/web)
+        |     |   extraction                    |     |     +-> chunking (fixed/structure)
+        |     +-> memory creation/update        |     |     +-> embedding (local/API)
+        |     +-> provenance receipts           |     |     +-> storage (documents/chunks)
+        |     +-> deterministic retrieval       |     |
+        |     +-> reason codes                  |     +-> hybrid retrieval
+        |                                       |     |     +-> vector search (pgvector)
+        +-- Generation service                  |     |     +-> keyword search (tsvector)
+        |     +-> context assembly              |     |     +-> RRF fusion
+        |     +-> LLM prompt construction       |     |     +-> metadata filters
+        |     +-> citation extraction           |     |     +-> receipt construction
+        |     +-> receipt block                 |     |
+        |                                       |     +-> reranking (optional)
+        +-- Evaluation framework                |
+              +-> golden datasets               +-- Shared
+              +-> deterministic metrics               +-> embeddings (ingestion + query)
+              +-> regression tracking                 +-> provider interfaces
+              +-> evaluation reports                  +-> structured logging
 
 PostgreSQL + pgvector
-        +--> sources
-        +--> memories
-        +--> evidence records
-        +--> verification events
+        +-> source_records, evidence_records    (operational memory)
+        +-> memory_records, provenance_links    (operational memory)
+        +-> documents, chunks                   (document RAG)
+        +-> chunk_embeddings                    (vector storage)
 ```
 
 ## Core design decisions
@@ -103,6 +110,80 @@ The MVP should support:
 6. Track freshness/recency using timestamps.
 7. Provide basic tests for API health, config, and retrieval scoring utilities.
 8. Maintain architecture notes, roadmap, and development rules.
+
+## Phase 1 operational intelligence vertical slice
+
+The first real memory slice is now focused on database operations and reliability events rather than generic chatbot memory.
+
+Operational event path:
+
+```text
+Operational Alert/Event
+  -> deterministic evidence extraction
+  -> operational memory record creation/update
+  -> provenance links as receipts
+  -> deterministic retrieval scoring
+  -> retrieval explanation reason codes
+```
+
+Operational domain examples:
+
+- database alarms
+- replication lag incidents
+- failover events
+- storage saturation
+- CPU saturation
+- connection exhaustion
+- deadlock spikes
+- remediation notes
+- runbook references
+
+Operational tables:
+
+- `source_records`: immutable raw operational events, including raw JSON payloads.
+- `evidence_records`: deterministic extracted dimensions and metrics.
+- `memory_records`: higher-level operational incident memory abstractions.
+- `provenance_links`: receipt links from memory to exact source/evidence support.
+
+The current deterministic memory identity is intentionally simple:
+
+```text
+environment:service:host_or_cluster:category
+```
+
+Example:
+
+```text
+prod:postgres-prod:db-01:replication_lag
+```
+
+Retrieval scoring currently favors explainability over intelligence. Signals include:
+
+- same service
+- same host
+- same environment
+- same alert category
+- same severity
+- evidence key overlap
+- recent incident
+
+To avoid noisy operational false positives, retrieval only returns memories with at least one meaningful operational anchor: same service, same host, same alert category, or evidence-key overlap. Weak context signals such as environment, severity, or recency help rank an already-related candidate, but they are not enough by themselves to return a match.
+
+The operational API surface is intentionally small:
+
+- `POST /operational-memory/events`: validate and ingest one structured operational event.
+- `POST /operational-memory/retrieval`: return matched memories, score, reason codes, freshness metadata, and provenance/source references.
+
+Idempotency strategy:
+
+- `source_identifier` is the strict idempotency key for operational event ingestion.
+- Duplicate/retried events return the existing source/memory/provenance graph.
+- Duplicate retries do not create new evidence, do not create new provenance links, and do not increase trust score.
+- The database unique constraint on `source_records.source_identifier` is the final safety net.
+
+This strategy is deliberately conservative. It prevents duplicate webhook retries from corrupting trust while avoiding fuzzy incident merging before real operational examples justify that complexity.
+
+No LLM extraction, embeddings, vector search, agents, queues, or microservices are used in this slice.
 
 ## Request and data flow
 

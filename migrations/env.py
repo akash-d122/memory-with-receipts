@@ -7,7 +7,10 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from memory_with_receipts.core.config import Settings
 from memory_with_receipts.db.base import Base
-from memory_with_receipts.memory import models  # noqa: F401 - imports models for metadata
+from memory_with_receipts.memory import (  # noqa: F401 - imports models for metadata
+    models,
+    operational_models,
+)
 
 config = context.config
 settings = Settings()

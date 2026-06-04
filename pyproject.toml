@@ -1,7 +1,7 @@
 [project]
 name = "memory-with-receipts"
 version = "0.1.0"
-description = "A production-style RAG/memory system where every recalled memory includes receipts, provenance, freshness, contradiction status, and retrieval explanation."
+description = "Production-grade RAG system where every answer includes traceable receipts: source provenance, retrieval reasoning, and evaluation-backed reliability."
 readme = "README.md"
 authors = [
     { name = "Akash Duddekunta", email = "akashlucky2232@gmail.com" }
@@ -12,6 +12,7 @@ dependencies = [
     "asyncpg>=0.31.0",
     "fastapi>=0.136.1",
     "pgvector>=0.4.2",
+    "psycopg[binary]>=3.3.2",
     "pydantic-settings>=2.14.1",
     "python-dotenv>=1.2.2",
     "sqlalchemy>=2.0.49",
@@ -31,6 +32,7 @@ dev = [
     "httpx>=0.28.1",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.3.0",
+    "pytest-cov>=6.0",
     "ruff>=0.15.13",
 ]
 
