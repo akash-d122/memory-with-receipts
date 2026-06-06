@@ -23,6 +23,9 @@ dependencies = [
 [project.scripts]
 memory-with-receipts = "memory_with_receipts.__main__:main"
 
+[project.optional-dependencies]
+local-embeddings = ["sentence-transformers>=3.0"]
+
 [build-system]
 requires = ["uv_build>=0.11.12,<0.12.0"]
 build-backend = "uv_build"

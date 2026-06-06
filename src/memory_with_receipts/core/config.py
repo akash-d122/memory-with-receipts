@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     app_name: str = "Memory With Receipts"
     environment: str = "test"
     log_level: str = "INFO"
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/memory_with_receipts"
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/memory_with_receipts"
 
     # LLM provider
     llm_provider: str = "mock"

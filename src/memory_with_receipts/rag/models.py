@@ -1,19 +1,65 @@
-"""RAG document and chunk SQLAlchemy models.
+"""RAG document, chunk, and chunk-embedding SQLAlchemy models.
 
-These tables store ingested documents and their chunks. No embedding
-columns here — those are added in Phase 3 via a separate migration.
+These tables store ingested documents, their chunks, and vector embeddings.
+The ChunkEmbedding model uses pgvector on Postgres and falls back to JSON
+on SQLite for unit test portability.
 """
 
 import hashlib
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON, TypeDecorator
 
 from memory_with_receipts.db.base import Base
 from memory_with_receipts.memory.models import GUID, JsonCompat, UTCDateTime
+
+
+class VectorCompat(TypeDecorator):
+    """pgvector Vector on Postgres, JSON list on SQLite.
+
+    This lets unit tests run on in-memory SQLite while integration tests
+    use real pgvector columns. The dimension is set at construction time.
+    """
+
+    impl = JSON  # fallback for SQLite
+    cache_ok = True
+
+    def __init__(self, dimension: int = 384) -> None:
+        super().__init__()
+        self._dimension = dimension
+
+    def load_dialect_impl(self, dialect):  # type: ignore[no-untyped-def]
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(Vector(self._dimension))
+        return dialect.type_descriptor(JSON())
+
+    def process_bind_param(self, value, dialect):  # type: ignore[no-untyped-def]
+        if value is None:
+            return None
+        if dialect.name == "postgresql":
+            # pgvector accepts lists directly
+            return value
+        # SQLite: store as JSON string
+        return json.dumps(value) if isinstance(value, list) else value
+
+    def process_result_value(self, value, dialect):  # type: ignore[no-untyped-def]
+        if value is None:
+            return None
+        if dialect.name == "postgresql":
+            # pgvector returns numpy array or list
+            if hasattr(value, "tolist"):
+                return value.tolist()
+            return list(value)
+        # SQLite: parse from JSON string
+        if isinstance(value, str):
+            return json.loads(value)
+        return value
 
 
 class Document(Base):
@@ -79,3 +125,33 @@ class Chunk(Base):
     )
 
     document: Mapped[Document] = relationship(back_populates="chunks")
+    embeddings: Mapped[list["ChunkEmbedding"]] = relationship(
+        back_populates="chunk", cascade="all, delete-orphan"
+    )
+
+
+class ChunkEmbedding(Base):
+    """Vector embedding for a text chunk.
+
+    Stores the embedding vector alongside metadata about which model and
+    provider generated it. The embedding column uses pgvector's Vector type
+    on Postgres and falls back to JSON on SQLite for unit tests.
+    """
+
+    __tablename__ = "chunk_embeddings"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    chunk_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("chunks.id"), nullable=False
+    )
+    embedding: Mapped[list[float]] = mapped_column(
+        VectorCompat(384), nullable=False
+    )
+    embedding_model: Mapped[str] = mapped_column(String(200), nullable=False)
+    embedding_dimension: Mapped[int] = mapped_column(Integer, nullable=False)
+    embedding_provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    embedded_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+    chunk: Mapped[Chunk] = relationship(back_populates="embeddings")

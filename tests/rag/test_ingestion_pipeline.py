@@ -222,7 +222,9 @@ class TestIngestionPipeline:
     def test_no_embeddings_generated(
         self, db_session: Session, pipeline: IngestionPipeline
     ) -> None:
-        """Phase 2 must not generate any embeddings."""
+        """Pipeline without embedding_provider must not generate any embeddings."""
+        from memory_with_receipts.rag.models import ChunkEmbedding
+
         result = pipeline.ingest(
             session=db_session,
             raw_content="Content for embedding check.",
@@ -230,14 +232,111 @@ class TestIngestionPipeline:
             title="No Embed",
         )
 
-        # Document and chunks should exist, but no embedding tables
+        # Document and chunks should exist
         assert result.chunk_count > 0
-        # Verify no embedding-related attributes on the chunk model
-        chunk = (
-            db_session.query(Chunk)
-            .filter_by(document_id=result.document_id)
-            .first()
+        assert result.embeddings_created == 0
+
+        # Verify no ChunkEmbedding rows were created
+        embedding_count = db_session.query(ChunkEmbedding).count()
+        assert embedding_count == 0
+
+
+class TestIngestionPipelineWithEmbeddings:
+    """Tests for the optional embedding step in the ingestion pipeline."""
+
+    @pytest.fixture
+    def embedding_pipeline(self) -> IngestionPipeline:
+        """Create a pipeline with mock embedding provider."""
+        from memory_with_receipts.embeddings.mock import MockEmbeddingProvider
+
+        return IngestionPipeline(
+            parsers=[TextParser(), MarkdownParser()],
+            chunker=FixedSizeChunker(chunk_size=100, chunk_overlap=10),
+            embedding_provider=MockEmbeddingProvider(dimension=384),
         )
-        assert chunk is not None
-        # The chunk should NOT have an embedding attribute
-        assert not hasattr(chunk, "embedding")
+
+    def test_ingest_with_embeddings_creates_chunk_embeddings(
+        self, db_session: Session, embedding_pipeline: IngestionPipeline
+    ) -> None:
+        """Pipeline with embedding provider must create ChunkEmbedding rows."""
+        from memory_with_receipts.rag.models import ChunkEmbedding
+
+        result = embedding_pipeline.ingest(
+            session=db_session,
+            raw_content="Content that will be embedded during ingestion.",
+            source_type="text",
+            title="Embedded Doc",
+        )
+
+        assert not result.is_duplicate
+        assert result.chunk_count > 0
+        assert result.embeddings_created == result.chunk_count
+
+        # Verify ChunkEmbedding rows exist
+        embeddings = db_session.query(ChunkEmbedding).all()
+        assert len(embeddings) == result.chunk_count
+
+        # Verify embedding metadata
+        for emb in embeddings:
+            assert emb.embedding_model == "mock-embedding-model"
+            assert emb.embedding_dimension == 384
+            assert emb.embedding_provider == "mock"
+            assert emb.embedded_at is not None
+            # VectorCompat on SQLite stores as JSON, so verify we get a list back
+            assert isinstance(emb.embedding, (list, str))
+
+    def test_ingest_with_embeddings_correct_dimension(
+        self, db_session: Session, embedding_pipeline: IngestionPipeline
+    ) -> None:
+        """Embedded vectors must have the correct dimension."""
+        from memory_with_receipts.rag.models import ChunkEmbedding
+
+        embedding_pipeline.ingest(
+            session=db_session,
+            raw_content="Dimension check content.",
+            source_type="text",
+            title="Dim Check",
+        )
+
+        emb = db_session.query(ChunkEmbedding).first()
+        assert emb is not None
+        vector = emb.embedding
+        # On SQLite, VectorCompat stores as JSON string; parse if needed
+        if isinstance(vector, str):
+            import json
+
+            vector = json.loads(vector)
+        assert len(vector) == 384
+
+    def test_duplicate_does_not_re_embed(
+        self, db_session: Session, embedding_pipeline: IngestionPipeline
+    ) -> None:
+        """Duplicate ingestion must not create additional embeddings."""
+        from memory_with_receipts.rag.models import ChunkEmbedding
+
+        content = "Content for duplicate embedding test."
+
+        # First ingestion
+        result1 = embedding_pipeline.ingest(
+            session=db_session,
+            raw_content=content,
+            source_type="text",
+            title="First",
+        )
+        first_count = db_session.query(ChunkEmbedding).count()
+        assert result1.embeddings_created > 0
+
+        # Second ingestion with same content
+        result2 = embedding_pipeline.ingest(
+            session=db_session,
+            raw_content=content,
+            source_type="text",
+            title="Second",
+        )
+        assert result2.is_duplicate
+        assert result2.embeddings_created == 0
+
+        # No additional embeddings created
+        assert db_session.query(ChunkEmbedding).count() == first_count
+
+

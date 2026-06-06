@@ -11,6 +11,7 @@ from memory_with_receipts.memory import (  # noqa: F401 - imports models for met
     models,
     operational_models,
 )
+from memory_with_receipts.rag import models as rag_models  # noqa: F401
 
 config = context.config
 settings = Settings()
