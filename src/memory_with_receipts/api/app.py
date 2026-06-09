@@ -10,6 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from memory_with_receipts.api.routes.health import router as health_router
 from memory_with_receipts.api.routes.operational_memory import router as operational_memory_router
+from memory_with_receipts.api.routes.search import router as search_router
 from memory_with_receipts.core.config import Settings
 from memory_with_receipts.core.logging import configure_logging, get_logger
 
@@ -69,6 +70,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(RequestLoggingMiddleware)
     app.include_router(health_router)
     app.include_router(operational_memory_router)
+    app.include_router(search_router)
+
+    # Lazy-init search service and RAG session factory on first use
+    # Tests override these via app.state or dependency_overrides
+    app.state.search_service = None
+    app.state.rag_session_factory = None
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(
