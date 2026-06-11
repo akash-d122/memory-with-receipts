@@ -122,8 +122,18 @@ def _sqlite_keyword_search(
     metadata_filters: dict[str, Any] | None,
 ) -> list[KeywordSearchResult]:
     """SQLite fallback using LIKE matching (for unit tests)."""
-    conditions = ["c.content LIKE :pattern"]
-    params: dict[str, Any] = {"pattern": f"%{query_text}%", "top_k": top_k}
+    words = [w for w in query_text.split() if w.strip()]
+    if not words:
+        return []
+
+    params: dict[str, Any] = {"top_k": top_k}
+    word_conditions = []
+    for i, word in enumerate(words):
+        param_name = f"pattern_{i}"
+        word_conditions.append(f"c.content LIKE :{param_name}")
+        params[param_name] = f"%{word}%"
+
+    conditions = ["(" + " OR ".join(word_conditions) + ")"]
 
     if source_type is not None:
         conditions.append("d.source_type = :source_type")

@@ -1,4 +1,4 @@
-"""Gemini LLM provider using the google-generativeai SDK.
+"""Gemini LLM provider using the google-genai SDK.
 
 This module is guarded with a helpful ImportError if the optional
 dependency group [llm-gemini] is not installed:
@@ -16,23 +16,24 @@ from memory_with_receipts.llm.base import BaseLLMProvider, GenerationResult
 
 
 class GeminiLLMProvider(BaseLLMProvider):
-    """LLM provider backed by Google Gemini via google-generativeai.
+    """LLM provider backed by Google Gemini via google-genai SDK.
 
     Args:
         api_key: Gemini API key.  If empty, raises GenerationError on first call.
-        model_name: Gemini model identifier (default: ``gemini-2.0-flash``).
+        model_name: Gemini model identifier (default: ``gemini-3.5-flash``).
     """
 
     def __init__(
         self,
         api_key: str,
-        model_name: str = "gemini-2.0-flash",
+        model_name: str = "gemini-3.5-flash",
     ) -> None:
         try:
-            import google.generativeai as genai  # type: ignore[import]
+            from google import genai  # type: ignore[import]
+            from google.genai import types  # type: ignore[import]
         except ImportError as exc:
             raise ImportError(
-                "google-generativeai is not installed. "
+                "google-genai is not installed. "
                 "Install the optional dependency group: "
                 "uv pip install 'memory-with-receipts[llm-gemini]'"
             ) from exc
@@ -40,8 +41,8 @@ class GeminiLLMProvider(BaseLLMProvider):
         if not api_key:
             raise GenerationError("Gemini API key must be non-empty.")
 
-        genai.configure(api_key=api_key)
-        self._model = genai.GenerativeModel(model_name)
+        self._client = genai.Client(api_key=api_key)
+        self._types = types
         self._model_name = model_name
 
     @property
@@ -59,7 +60,10 @@ class GeminiLLMProvider(BaseLLMProvider):
             GenerationError: On any SDK or network error.
         """
         try:
-            response = self._model.generate_content(prompt)
+            response = self._client.models.generate_content(
+                model=self._model_name,
+                contents=prompt,
+            )
             answer = response.text
             usage = getattr(response, "usage_metadata", None)
             input_tokens = getattr(usage, "prompt_token_count", None)

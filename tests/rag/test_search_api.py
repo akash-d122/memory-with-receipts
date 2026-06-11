@@ -9,7 +9,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from memory_with_receipts.api.app import create_app
-from memory_with_receipts.api.routes.search import _get_rag_db_session, _get_search_service
+from memory_with_receipts.api.rag_dependencies import get_rag_db_session
+from memory_with_receipts.api.routes.search import _get_search_service
 from memory_with_receipts.db.base import Base
 from memory_with_receipts.embeddings.mock import MockEmbeddingProvider
 from memory_with_receipts.rag.models import Chunk, ChunkEmbedding, Document
@@ -43,7 +44,7 @@ def _test_app_with_search():
     def override_search_service():
         return service
 
-    app.dependency_overrides[_get_rag_db_session] = override_db_session
+    app.dependency_overrides[get_rag_db_session] = override_db_session
     app.dependency_overrides[_get_search_service] = override_search_service
 
     return app, session_factory, provider

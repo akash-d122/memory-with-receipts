@@ -9,6 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
+from memory_with_receipts.api.rag_dependencies import get_rag_db_session
 from memory_with_receipts.api.search_schemas import SearchRequest, SearchResponse, SearchResult
 from memory_with_receipts.core.exceptions import EmbeddingError, RetrievalError
 from memory_with_receipts.core.logging import get_logger
@@ -24,18 +25,11 @@ def _get_search_service(request: Request) -> SearchService:
     return request.app.state.search_service
 
 
-def _get_rag_db_session(request: Request):  # type: ignore[no-untyped-def]
-    """Dependency: short-lived sync DB session for RAG queries."""
-    session_factory = request.app.state.rag_session_factory
-    with session_factory() as session:
-        yield session
-
-
 @router.post("/search", response_model=SearchResponse)
 def search(
     body: SearchRequest,
     request: Request,
-    session: Annotated[Session, Depends(_get_rag_db_session)],
+    session: Annotated[Session, Depends(get_rag_db_session)],
     service: Annotated[SearchService, Depends(_get_search_service)],
 ) -> SearchResponse:
     """Hybrid search over ingested documents with receipt metadata."""

@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # LLM provider
     llm_provider: str = "mock"
-    llm_model: str = "gemini-2.0-flash"
+    llm_model: str = "gemini-3.5-flash"
     gemini_api_key: str = ""
     openai_api_key: str = ""
     anthropic_api_key: str = ""

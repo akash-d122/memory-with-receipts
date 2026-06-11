@@ -52,11 +52,10 @@ def search_service(embedding_provider):
 
 
 @pytest.fixture
-def generation_service(llm_provider, search_service, embedding_provider):
+def generation_service(llm_provider, search_service):
     return GenerationService(
         llm_provider=llm_provider,
         search_service=search_service,
-        embedding_provider=embedding_provider,
         default_top_k=5,
     )
 
@@ -204,7 +203,6 @@ class TestGenerationServiceSentinel:
         service = GenerationService(
             llm_provider=sentinel_provider,
             search_service=search_service,
-            embedding_provider=embedding_provider,
         )
         _seed_document(db_session, content="Some content to retrieve")
         result = service.ask(session=db_session, query="some query")
@@ -220,7 +218,6 @@ class TestGenerationServiceSentinel:
         service = GenerationService(
             llm_provider=sentinel_provider,
             search_service=search_service,
-            embedding_provider=embedding_provider,
         )
         _seed_document(db_session, content="Content that exists")
         result = service.ask(session=db_session, query="query")
@@ -264,7 +261,6 @@ class TestGenerationServiceCitationReceipts:
         service = GenerationService(
             llm_provider=llm_provider,
             search_service=search_service,
-            embedding_provider=embedding_provider,
         )
 
         _seed_document(db_session, content="Operational database failover content", embed=False)

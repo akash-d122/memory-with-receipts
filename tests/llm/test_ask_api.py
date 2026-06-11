@@ -62,11 +62,10 @@ def search_service(embedding_provider):
 
 
 @pytest.fixture
-def generation_service(llm_provider, search_service, embedding_provider):
+def generation_service(llm_provider, search_service):
     return GenerationService(
         llm_provider=llm_provider,
         search_service=search_service,
-        embedding_provider=embedding_provider,
         default_top_k=5,
     )
 

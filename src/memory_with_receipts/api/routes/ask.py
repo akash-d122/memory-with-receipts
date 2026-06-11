@@ -14,6 +14,7 @@ from memory_with_receipts.api.ask_schemas import (
     AskResponse,
     CitationReceiptSchema,
 )
+from memory_with_receipts.api.rag_dependencies import get_rag_db_session
 from memory_with_receipts.core.exceptions import GenerationError, RetrievalError
 from memory_with_receipts.core.logging import get_logger
 from memory_with_receipts.llm.generation import GenerationService
@@ -28,18 +29,11 @@ def _get_generation_service(request: Request) -> GenerationService:
     return request.app.state.generation_service
 
 
-def _get_rag_db_session(request: Request):  # type: ignore[no-untyped-def]
-    """Dependency: short-lived sync DB session for RAG queries."""
-    session_factory = request.app.state.rag_session_factory
-    with session_factory() as session:
-        yield session
-
-
 @router.post("/ask", response_model=AskResponse)
 def ask(
     body: AskRequest,
     request: Request,
-    session: Annotated[Session, Depends(_get_rag_db_session)],
+    session: Annotated[Session, Depends(get_rag_db_session)],
     service: Annotated[GenerationService, Depends(_get_generation_service)],
 ) -> AskResponse:
     """Generate a grounded answer with inline citations and provenance receipts."""

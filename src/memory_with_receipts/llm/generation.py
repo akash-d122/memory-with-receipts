@@ -20,7 +20,6 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from memory_with_receipts.core.exceptions import GenerationError, RetrievalError
-from memory_with_receipts.embeddings.base import BaseEmbeddingProvider
 from memory_with_receipts.llm.base import BaseLLMProvider
 from memory_with_receipts.llm.citations import CitationReceipt, build_citation_receipts
 from memory_with_receipts.llm.prompts import INSUFFICIENT_CONTEXT_MARKER, build_rag_prompt
@@ -68,7 +67,6 @@ class GenerationService:
     Args:
         llm_provider: Any BaseLLMProvider implementation.
         search_service: Configured SearchService for retrieval.
-        embedding_provider: Embedding provider (passed through to search).
         default_top_k: Default number of chunks to retrieve if not overridden.
     """
 
@@ -76,12 +74,10 @@ class GenerationService:
         self,
         llm_provider: BaseLLMProvider,
         search_service: SearchService,
-        embedding_provider: BaseEmbeddingProvider,
         default_top_k: int = 5,
     ) -> None:
         self._llm = llm_provider
         self._search_service = search_service
-        self._embedding_provider = embedding_provider
         self._default_top_k = default_top_k
 
     def ask(
@@ -133,7 +129,7 @@ class GenerationService:
                 enable_vector=enable_vector,
                 enable_keyword=enable_keyword,
             )
-        except (RetrievalError, Exception) as exc:
+        except Exception as exc:
             if not isinstance(exc, RetrievalError):
                 raise RetrievalError(f"Retrieval failed: {exc}") from exc
             raise
