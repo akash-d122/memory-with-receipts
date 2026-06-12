@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from memory_with_receipts.api.routes.ask import router as ask_router
+from memory_with_receipts.api.routes.eval import router as eval_router
 from memory_with_receipts.api.routes.health import router as health_router
 from memory_with_receipts.api.routes.operational_memory import router as operational_memory_router
 from memory_with_receipts.api.routes.search import router as search_router
@@ -73,6 +74,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(operational_memory_router)
     app.include_router(search_router)
     app.include_router(ask_router)
+    app.include_router(eval_router)
 
     # Lazy-init services and RAG session factory on first use
     # Tests override these via app.state or dependency_overrides
