@@ -134,23 +134,23 @@ Exit criteria:
 - Evaluation report generated with per-metric scores.
 - CI-ready evaluation command works.
 
-## Phase 7: Advanced features
+## Phase 7: Advanced features (Completed)
 
 Goal: Mature the system with additional source types and advanced capabilities.
 
 Tasks:
 
-1. Add PDF parser.
-2. Add web page parser.
-3. Add JSON/API payload parser.
-4. Add semantic chunking.
-5. Add real cross-encoder reranker.
-6. Add OpenAI and Gemini embedding providers.
-7. Add LLM-judge metrics: faithfulness, answer relevance, claim-level coverage.
-8. Add operational memory adapter as a RAG connector.
+- [x] Add PDF parser.
+- [x] Add web page parser.
+- [x] Add JSON/API payload parser.
+- [x] Add semantic chunking.
+- [x] Add real cross-encoder reranker.
+- [x] Add Gemini embedding provider.
+- [x] Add LLM-judge metrics: faithfulness, answer relevance, claim-level coverage.
+- [x] Operational memory adapter.
 
 Exit criteria:
 
-- PDF, web, and JSON ingestion produce correct chunks.
-- Reranking improves retrieval precision.
-- LLM-judge metrics produce meaningful scores.
+- [x] PDF, web, and JSON ingestion produce correct chunks.
+- [x] Reranking improves retrieval precision.
+- [x] LLM-judge metrics produce meaningful scores.

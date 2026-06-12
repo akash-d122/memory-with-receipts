@@ -20,6 +20,7 @@ class Section:
     start_char: int
     end_char: int
     heading_path: str = ""  # e.g. "Architecture > Core Design > Decisions"
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass

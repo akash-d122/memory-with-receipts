@@ -158,18 +158,19 @@ class SearchService:
         # 3. RRF fusion
         fused = reciprocal_rank_fusion(vector_items, keyword_items)
 
-        # 4. Rerank
-        fused = self._reranker.rerank(query, fused)
-
-        # 5. Truncate to top_k
-        fused = fused[:top_k]
-
         if not fused:
             return []
 
-        # 6. Hydrate with chunk + document metadata
-        chunk_ids = [f.chunk_id for f in fused]
-        return self._build_receipts(session, fused, chunk_ids)
+        # 4. Hydrate top candidates (e.g. up to top_k * 2) to get content for reranking
+        candidates = fused[: top_k * 2]
+        chunk_ids = [f.chunk_id for f in candidates]
+        hydrated = self._build_receipts(session, candidates, chunk_ids)
+
+        # 5. Rerank hydrated SearchResultData objects
+        reranked = self._reranker.rerank(query, hydrated)
+
+        # 6. Truncate to top_k
+        return reranked[:top_k]
 
     def _build_receipts(
         self,

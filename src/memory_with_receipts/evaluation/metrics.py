@@ -16,7 +16,11 @@ Metrics:
 
 from __future__ import annotations
 
+import json
+import re
+
 from memory_with_receipts.evaluation.schemas import MetricResult
+from memory_with_receipts.llm.base import BaseLLMProvider
 from memory_with_receipts.llm.citations import CitationReceipt
 from memory_with_receipts.llm.generation import AskResult
 from memory_with_receipts.rag.search_service import SearchResultData
@@ -333,3 +337,191 @@ def must_not_include_terms_check(
     return MetricResult(
         name="must_not_include_terms", passed=passed, score=score, detail=detail
     )
+
+
+# ── LLM-Judge metrics ──────────────────────────────────────────────────────────
+
+def _parse_llm_json(text: str) -> tuple[float, str]:
+    """Helper to parse a float score and string reason from LLM response JSON."""
+    match = re.search(r"\{[\s\S]*\}", text)
+    if match:
+        try:
+            data = json.loads(match.group(0))
+            score = float(data.get("score", 0.0))
+            reason = str(data.get("reason", ""))
+            return score, reason
+        except Exception:
+            pass
+    # Fallback: extract the first float in the raw text
+    float_match = re.search(r"0?\.\d+|1\.0|0", text)
+    if float_match:
+        return float(float_match.group(0)), text.strip()
+    return 0.0, f"Failed to parse score/reason from LLM output: {text}"
+
+
+def faithfulness(
+    answer: str,
+    context_chunks: list[SearchResultData],
+    llm_provider: BaseLLMProvider,
+) -> MetricResult:
+    """Evaluate faithfulness of the answer relative to the context using an LLM.
+
+    Args:
+        answer: Generated answer text.
+        context_chunks: Retrieved context chunks.
+        llm_provider: BaseLLMProvider instance.
+
+    Returns:
+        MetricResult. Passes when faithfulness score >= 0.75.
+    """
+    if not context_chunks:
+        return MetricResult(
+            name="faithfulness",
+            passed=True,
+            score=1.0,
+            detail="No context chunks to evaluate faithfulness against.",
+        )
+
+    context_str = "\n\n".join(
+        f"Chunk {i + 1}:\n{c.content}" for i, c in enumerate(context_chunks)
+    )
+    prompt = f"""You are an expert evaluator.
+Evaluate the FAITHFULNESS of an answer given a set of retrieved context chunks.
+An answer is faithful if all claims/statements made in the answer can be directly
+inferred from the retrieved context.
+
+Retrieved Context Chunks:
+{context_str}
+
+Proposed Answer:
+{answer}
+
+Output a single JSON object with two fields:
+- "score": A float between 0.0 and 1.0 (where 1.0 means fully faithful and supported,
+  and 0.0 means completely unsupported or hallucinated).
+- "reason": A brief explanation of your decision.
+
+Do not output anything else. Only JSON.
+"""
+    try:
+        gen_res = llm_provider.generate(prompt)
+        score, reason = _parse_llm_json(gen_res.answer)
+    except Exception as e:
+        return MetricResult(
+            name="faithfulness",
+            passed=False,
+            score=0.0,
+            detail=f"Failed to run faithfulness LLM evaluation: {e}",
+        )
+
+    passed = score >= 0.75
+    detail = f"Faithfulness score: {score}. Reason: {reason}"
+    return MetricResult(name="faithfulness", passed=passed, score=score, detail=detail)
+
+
+def answer_relevance(
+    answer: str,
+    query: str,
+    llm_provider: BaseLLMProvider,
+) -> MetricResult:
+    """Evaluate relevance of the answer to the user query using an LLM.
+
+    Args:
+        answer: Generated answer text.
+        query: User search query.
+        llm_provider: BaseLLMProvider instance.
+
+    Returns:
+        MetricResult. Passes when relevance score >= 0.75.
+    """
+    prompt = f"""You are an expert evaluator. Evaluate the RELEVANCE of an answer given a query.
+An answer is relevant if it directly addresses the query and doesn't contain
+redundant or irrelevant details.
+
+Query:
+{query}
+
+Proposed Answer:
+{answer}
+
+Output a single JSON object with two fields:
+- "score": A float between 0.0 and 1.0 (where 1.0 means highly relevant,
+  and 0.0 means completely irrelevant or off-topic).
+- "reason": A brief explanation of your decision.
+
+Do not output anything else. Only JSON.
+"""
+    try:
+        gen_res = llm_provider.generate(prompt)
+        score, reason = _parse_llm_json(gen_res.answer)
+    except Exception as e:
+        return MetricResult(
+            name="answer_relevance",
+            passed=False,
+            score=0.0,
+            detail=f"Failed to run answer relevance LLM evaluation: {e}",
+        )
+
+    passed = score >= 0.75
+    detail = f"Relevance score: {score}. Reason: {reason}"
+    return MetricResult(name="answer_relevance", passed=passed, score=score, detail=detail)
+
+
+def claim_coverage(
+    answer: str,
+    context_chunks: list[SearchResultData],
+    llm_provider: BaseLLMProvider,
+) -> MetricResult:
+    """Evaluate context claim coverage of the answer using an LLM.
+
+    Args:
+        answer: Generated answer text.
+        context_chunks: Retrieved context chunks.
+        llm_provider: BaseLLMProvider instance.
+
+    Returns:
+        MetricResult. Passes when coverage score >= 0.75.
+    """
+    if not context_chunks:
+        return MetricResult(
+            name="claim_coverage",
+            passed=True,
+            score=1.0,
+            detail="No context chunks to evaluate coverage against.",
+        )
+
+    context_str = "\n\n".join(
+        f"Chunk {i + 1}:\n{c.content}" for i, c in enumerate(context_chunks)
+    )
+    prompt = f"""You are an expert evaluator.
+Evaluate the CLAIM COVERAGE of an answer relative to the context.
+Claim coverage measures what fraction of key claims/facts in the context chunks
+are successfully represented or covered in the answer.
+
+Context Chunks:
+{context_str}
+
+Proposed Answer:
+{answer}
+
+Output a single JSON object with two fields:
+- "score": A float between 0.0 and 1.0 (where 1.0 means all key claims in the context
+  are covered in the answer, and 0.0 means no key claims are covered).
+- "reason": A brief explanation of your decision.
+
+Do not output anything else. Only JSON.
+"""
+    try:
+        gen_res = llm_provider.generate(prompt)
+        score, reason = _parse_llm_json(gen_res.answer)
+    except Exception as e:
+        return MetricResult(
+            name="claim_coverage",
+            passed=False,
+            score=0.0,
+            detail=f"Failed to run claim coverage LLM evaluation: {e}",
+        )
+
+    passed = score >= 0.75
+    detail = f"Claim coverage score: {score}. Reason: {reason}"
+    return MetricResult(name="claim_coverage", passed=passed, score=score, detail=detail)

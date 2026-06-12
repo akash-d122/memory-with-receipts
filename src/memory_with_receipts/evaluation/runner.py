@@ -15,9 +15,12 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from memory_with_receipts.evaluation.metrics import (
+    answer_relevance,
     citation_count_check,
+    claim_coverage,
     context_precision,
     context_recall_at_k,
+    faithfulness,
     must_include_terms_check,
     must_not_include_terms_check,
     receipt_coverage,
@@ -30,6 +33,7 @@ from memory_with_receipts.evaluation.schemas import (
     GoldenCase,
     MetricResult,
 )
+from memory_with_receipts.llm.base import BaseLLMProvider
 from memory_with_receipts.llm.generation import GenerationService
 
 # Sentinel pattern: detect when retrieval returned no chunks
@@ -43,6 +47,7 @@ class EvalRunner:
         generation_service: Configured GenerationService (any LLM provider).
         session: SQLAlchemy session — must be open for the lifetime of the run.
         top_k: Number of context chunks to retrieve per query.
+        llm_provider: Optional BaseLLMProvider for running LLM-judge metrics.
     """
 
     def __init__(
@@ -50,10 +55,12 @@ class EvalRunner:
         generation_service: GenerationService,
         session: Session,
         top_k: int = 5,
+        llm_provider: BaseLLMProvider | None = None,
     ) -> None:
         self._service = generation_service
         self._session = session
         self._top_k = top_k
+        self._llm_provider = llm_provider
 
     def run_case(self, case: GoldenCase) -> CaseResult:
         """Evaluate a single golden case.
@@ -103,6 +110,25 @@ class EvalRunner:
                 terms=case.must_not_include_terms,
             ),
         ]
+
+        if self._llm_provider is not None:
+            metrics.extend([
+                faithfulness(
+                    answer=ask_result.answer,
+                    context_chunks=getattr(ask_result, "_retrieved_chunks", []),
+                    llm_provider=self._llm_provider,
+                ),
+                answer_relevance(
+                    answer=ask_result.answer,
+                    query=case.query,
+                    llm_provider=self._llm_provider,
+                ),
+                claim_coverage(
+                    answer=ask_result.answer,
+                    context_chunks=getattr(ask_result, "_retrieved_chunks", []),
+                    llm_provider=self._llm_provider,
+                ),
+            ])
 
         overall_passed = all(m.passed for m in metrics)
 
