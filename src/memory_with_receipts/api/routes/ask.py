@@ -14,7 +14,7 @@ from memory_with_receipts.api.ask_schemas import (
     AskResponse,
     CitationReceiptSchema,
 )
-from memory_with_receipts.api.rag_dependencies import get_rag_db_session
+from memory_with_receipts.api.rag_dependencies import get_generation_service, get_rag_db_session
 from memory_with_receipts.core.exceptions import GenerationError, RetrievalError
 from memory_with_receipts.core.logging import get_logger
 from memory_with_receipts.llm.generation import GenerationService
@@ -25,8 +25,8 @@ router = APIRouter(prefix="/v1", tags=["ask"])
 
 
 def _get_generation_service(request: Request) -> GenerationService:
-    """Dependency: retrieve GenerationService from app state."""
-    return request.app.state.generation_service
+    """Dependency: retrieve GenerationService via lazy-initialized getter."""
+    return get_generation_service(request)
 
 
 @router.post("/ask", response_model=AskResponse)

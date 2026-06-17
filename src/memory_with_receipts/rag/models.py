@@ -16,6 +16,7 @@ from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON, TypeDecorator
 
+from memory_with_receipts.core.config import Settings
 from memory_with_receipts.db.base import Base
 from memory_with_receipts.memory.models import GUID, JsonCompat, UTCDateTime
 
@@ -145,7 +146,7 @@ class ChunkEmbedding(Base):
         GUID(), ForeignKey("chunks.id"), nullable=False
     )
     embedding: Mapped[list[float]] = mapped_column(
-        VectorCompat(384), nullable=False
+        VectorCompat(Settings().embedding_dimension), nullable=False
     )
     embedding_model: Mapped[str] = mapped_column(String(200), nullable=False)
     embedding_dimension: Mapped[int] = mapped_column(Integer, nullable=False)

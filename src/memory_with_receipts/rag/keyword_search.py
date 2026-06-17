@@ -121,8 +121,27 @@ def _sqlite_keyword_search(
     date_to: datetime | None,
     metadata_filters: dict[str, Any] | None,
 ) -> list[KeywordSearchResult]:
-    """SQLite fallback using LIKE matching (for unit tests)."""
-    words = [w for w in query_text.split() if w.strip()]
+    """SQLite fallback using LIKE matching (for unit tests).
+
+    Filters short/stop words to avoid matching every chunk on queries
+    like 'What should I do when...' where stop words dominate.
+    """
+    _STOP_WORDS = {
+        "a", "an", "the", "and", "or", "but", "in", "on", "at", "to",
+        "for", "of", "with", "by", "is", "it", "its", "be", "as", "are",
+        "was", "were", "been", "have", "has", "had", "do", "does", "did",
+        "will", "would", "could", "should", "may", "might", "shall",
+        "that", "this", "these", "those", "not", "no", "so", "if", "i",
+        "what", "when", "where", "how", "why", "who", "which", "can",
+        "my", "your", "our", "their", "his", "her", "we", "they", "he",
+        "she", "me", "us", "you", "him", "them", "from",
+    }
+    words = [
+        w.strip("?.,!:;\"'").lower()
+        for w in query_text.split()
+        if len(w.strip("?.,!:;\"'")) >= 3
+        and w.strip("?.,!:;\"'").lower() not in _STOP_WORDS
+    ]
     if not words:
         return []
 

@@ -9,7 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from memory_with_receipts.api.rag_dependencies import get_rag_db_session
+from memory_with_receipts.api.rag_dependencies import get_rag_db_session, get_search_service
 from memory_with_receipts.api.search_schemas import SearchRequest, SearchResponse, SearchResult
 from memory_with_receipts.core.exceptions import EmbeddingError, RetrievalError
 from memory_with_receipts.core.logging import get_logger
@@ -21,8 +21,8 @@ router = APIRouter(prefix="/v1", tags=["search"])
 
 
 def _get_search_service(request: Request) -> SearchService:
-    """Dependency: retrieve SearchService from app state."""
-    return request.app.state.search_service
+    """Dependency: retrieve SearchService via lazy-initialized getter."""
+    return get_search_service(request)
 
 
 @router.post("/search", response_model=SearchResponse)

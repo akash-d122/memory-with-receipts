@@ -110,9 +110,10 @@ class GenerationService:
         """
         k = top_k if top_k is not None else self._default_top_k
 
-        # Detect dialect: pgvector <=> only works on Postgres
-        dialect = session.bind.dialect.name if session.bind else "sqlite"
-        enable_vector = dialect == "postgresql"
+        # Both vector and keyword search now work on all backends.
+        # vector_search.py handles SQLite via numpy cosine similarity;
+        # keyword_search.py falls back to LIKE matching on SQLite.
+        enable_vector = True
         enable_keyword = True
 
         # ── 1. Retrieve ──────────────────────────────────────────────────────

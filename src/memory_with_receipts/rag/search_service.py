@@ -6,19 +6,23 @@ Pipeline: embed query → vector search → keyword search → RRF fuse → rera
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from memory_with_receipts.core.exceptions import EmbeddingError, RetrievalError
+from memory_with_receipts.core.logging import get_logger
 from memory_with_receipts.embeddings.base import BaseEmbeddingProvider
 from memory_with_receipts.rag.fusion import RankedItem, reciprocal_rank_fusion
 from memory_with_receipts.rag.keyword_search import keyword_search
 from memory_with_receipts.rag.models import Chunk, ChunkEmbedding, Document
 from memory_with_receipts.rag.reranker import BaseReranker, NoOpReranker
 from memory_with_receipts.rag.vector_search import vector_search
+from memory_with_receipts.retrieval.scoring import score_operational_memories
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -67,6 +71,107 @@ class SearchService:
         self._embedding_provider = embedding_provider
         self._reranker = reranker or NoOpReranker()
 
+    def _extract_operational_query(self, session: Session, query_text: str) -> dict[str, Any]:
+        """Dynamically extract service, host, category, and severity from query text."""
+        from sqlalchemy import select
+
+        from memory_with_receipts.memory.operational_models import EvidenceRecord, SourceRecord
+
+        normalized_query = query_text.lower()
+
+        # 1. Match service name
+        services = session.execute(select(SourceRecord.service_name).distinct()).scalars().all()
+        matched_service = None
+        for service in services:
+            if service and service.lower() in normalized_query:
+                matched_service = service
+                break
+
+        # 2. Match host name
+        hosts = session.execute(
+            select(SourceRecord.host_name).where(SourceRecord.host_name is not None).distinct()
+        ).scalars().all()
+        matched_host = None
+        for host in hosts:
+            if host:
+                host_lower = host.lower()
+                short_host = host_lower.split(".")[0].split(":")[0]
+                if host_lower in normalized_query or short_host in normalized_query:
+                    matched_host = host
+                    break
+
+        # 3. Match category
+        categories = session.execute(
+            select(EvidenceRecord.evidence_value)
+            .where(EvidenceRecord.evidence_key == "category")
+            .distinct()
+        ).scalars().all()
+        matched_category = None
+        for cat in categories:
+            if cat and cat.lower() in normalized_query:
+                matched_category = cat
+                break
+
+        # 4. Match severity
+        matched_severity = None
+        for sev in ("critical", "warning", "info"):
+            if sev in normalized_query:
+                matched_severity = sev
+                break
+
+        return {
+            "service_name": matched_service,
+            "host_name": matched_host,
+            "category": matched_category,
+            "severity": matched_severity,
+            "metrics": {},
+            "occurred_at": datetime.now(UTC),
+        }
+
+    def _map_memory_result_to_search_result(self, result: dict[str, Any]) -> SearchResultData:
+        """Map scored operational memory to SearchResultData."""
+        memory_id = result["memory_id"]
+        memory_key = result["memory_key"]
+        summary = result["summary"]
+        score = result["score"] / 100.0  # normalize to 0.0 - 1.0 range
+        reasons = result["reasons"]
+
+        # Format incident provenance details as clear markdown lists
+        provenance_lines = []
+        for ref in result.get("provenance", []):
+            prov_str = (
+                f"- Fired at {ref['occurred_at']} (Severity: {ref['severity']}): "
+                f"{ref['evidence_key']}={ref['evidence_value']} "
+                f"(Source: {ref['title'] or ref['source_type']})"
+            )
+            provenance_lines.append(prov_str)
+
+        provenance_text = "\n".join(provenance_lines)
+        content = (
+            f"Active Alert Summary: {summary}\n"
+            f"Incident History / Evidence:\n{provenance_text}"
+        )
+
+        return SearchResultData(
+            chunk_id=memory_id,
+            document_id=memory_id,
+            document_title=f"Operational Memory: {memory_key}",
+            source_type="operational-memory",
+            uri=f"operational-memory://{memory_key}",
+            chunk_index=0,
+            content=content,
+            section_title="Operational Status Summary",
+            heading_path=f"Operational Memory > {memory_key}",
+            start_char=0,
+            end_char=len(content),
+            vector_score=score,
+            keyword_score=score,
+            rrf_score=score,
+            reason_codes=reasons,
+            embedding_provider="operational-memory-scoring",
+            embedding_model="rule-based",
+        )
+
     def search(
         self,
         session: Session,
@@ -79,7 +184,7 @@ class SearchService:
         enable_vector: bool = True,
         enable_keyword: bool = True,
     ) -> list[SearchResultData]:
-        """Execute hybrid search and return receipt-backed results.
+        """Execute hybrid search blending documents and operational memories.
 
         Args:
             session: SQLAlchemy session.
@@ -99,18 +204,46 @@ class SearchService:
             RetrievalError: If search fails.
             EmbeddingError: If query embedding fails or dimension mismatch.
         """
-        if not enable_vector and not enable_keyword:
-            return []
+        # 1. Fetch operational memory results if applicable
+        mem_results: list[SearchResultData] = []
+        if source_type in (None, "operational-memory"):
+            try:
+                op_query = self._extract_operational_query(session, query)
+                # Check if we matched anything meaningful (service, host, or category)
+                if op_query["service_name"] or op_query["host_name"] or op_query["category"]:
+                    op_results = score_operational_memories(session, op_query, limit=top_k)
+                    mem_results = [
+                        self._map_memory_result_to_search_result(r) for r in op_results
+                    ]
+            except Exception as e:
+                logger.error("failed_to_retrieve_operational_memory", error=str(e))
 
-        try:
-            return self._execute_search(
-                session, query, top_k, source_type, date_from, date_to,
-                metadata_filters, enable_vector, enable_keyword,
-            )
-        except EmbeddingError:
-            raise
-        except Exception as e:
-            raise RetrievalError(f"Search failed: {e}") from e
+        # 2. Fetch document search results if applicable
+        doc_results: list[SearchResultData] = []
+        if source_type != "operational-memory":
+            if not enable_vector and not enable_keyword:
+                doc_results = []
+            else:
+                try:
+                    doc_results = self._execute_search(
+                        session, query, top_k, source_type, date_from, date_to,
+                        metadata_filters, enable_vector, enable_keyword,
+                    )
+                except EmbeddingError:
+                    raise
+                except Exception as e:
+                    raise RetrievalError(f"Search failed: {e}") from e
+
+        # 3. Combine and return
+        if source_type == "operational-memory":
+            return mem_results[:top_k]
+        elif source_type is not None:
+            # Document-only filter (e.g. "markdown", "pdf")
+            return doc_results[:top_k]
+        else:
+            # Blended: operational memories first (highest context priority), then playbooks
+            combined = mem_results + doc_results
+            return combined[:top_k]
 
     def _execute_search(
         self,

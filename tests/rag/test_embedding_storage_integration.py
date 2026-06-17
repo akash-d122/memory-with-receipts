@@ -35,6 +35,9 @@ def pg_engine():
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.commit()
 
+    # Drop existing tables to ensure we start fresh under test environment settings
+    Base.metadata.drop_all(engine)
+
     # Create all tables (including chunk_embeddings with pgvector)
     Base.metadata.create_all(engine)
 

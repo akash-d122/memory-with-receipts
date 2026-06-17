@@ -13,6 +13,8 @@ import sqlalchemy as sa
 from alembic import op
 from pgvector.sqlalchemy import Vector
 
+from memory_with_receipts.core.config import Settings
+
 # revision identifiers, used by Alembic.
 revision = "003"
 down_revision = "002"
@@ -24,6 +26,8 @@ def upgrade() -> None:
     # Enable pgvector extension (idempotent)
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
+    dim = Settings().embedding_dimension
+
     # Create chunk_embeddings table
     op.create_table(
         "chunk_embeddings",
@@ -34,7 +38,7 @@ def upgrade() -> None:
             sa.ForeignKey("chunks.id"),
             nullable=False,
         ),
-        sa.Column("embedding", Vector(384), nullable=False),
+        sa.Column("embedding", Vector(dim), nullable=False),
         sa.Column("embedding_model", sa.String(200), nullable=False),
         sa.Column("embedding_dimension", sa.Integer(), nullable=False),
         sa.Column("embedding_provider", sa.String(100), nullable=False),
