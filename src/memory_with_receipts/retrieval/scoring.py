@@ -97,7 +97,7 @@ def score_operational_memories(
 
     query = _operational_query_profile(payload)
     scored_results = [_score_operational_memory(memory, query) for memory in memories]
-    results = [result for result in scored_results if _is_meaningful_operational_match(result)]
+    results = [result for result in scored_results if _is_meaningful_operational_match(result, query)]
     results.sort(key=lambda result: (-result["score"], result["memory_key"]))
     final_results = results[:limit]
 
@@ -186,12 +186,14 @@ def _score_operational_memory(memory: MemoryRecord, query: dict[str, Any]) -> di
     }
 
 
-def _is_meaningful_operational_match(result: dict[str, Any]) -> bool:
+def _is_meaningful_operational_match(result: dict[str, Any], query: dict[str, Any] | None = None) -> bool:
     """Exclude weak context-only matches from operational retrieval.
 
     Environment, severity, and recency help rank a candidate after there is a real
     operational anchor. Alone, they are too broad and create noisy false positives.
     """
+    if query and query.get("service_name") is None and query.get("host_name") is None and query.get("category") is None and not query.get("metric_keys"):
+        return True
     strong_reasons = {"same_service", "same_host", "same_alert_category"}
     return any(
         reason in strong_reasons or reason.startswith("evidence_overlap:")

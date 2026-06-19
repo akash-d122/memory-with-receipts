@@ -5,6 +5,7 @@ import uuid
 import structlog.contextvars
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -71,6 +72,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = app_settings
     app.add_middleware(RequestLoggingMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.include_router(health_router)
     app.include_router(operational_memory_router)
     app.include_router(search_router)
@@ -84,6 +92,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.rag_session_factory = None
     app.state.generation_service = None
     app.state.llm_provider = None
+
+    def _get_cors_headers(request: Request, correlation_id: str) -> dict[str, str]:
+        headers = {"x-correlation-id": correlation_id}
+        origin = request.headers.get("origin")
+        if origin:
+            import re
+            if re.match(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$", origin):
+                headers["Access-Control-Allow-Origin"] = origin
+                headers["Access-Control-Allow-Credentials"] = "true"
+        return headers
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(
@@ -105,7 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "fields": exc.errors(),
                 }
             },
-            headers={"x-correlation-id": correlation_id},
+            headers=_get_cors_headers(request, correlation_id),
         )
 
     @app.exception_handler(Exception)
@@ -126,7 +144,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "correlation_id": correlation_id,
                 }
             },
-            headers={"x-correlation-id": correlation_id},
+            headers=_get_cors_headers(request, correlation_id),
         )
 
     return app
