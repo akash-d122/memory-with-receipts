@@ -154,3 +154,48 @@ Exit criteria:
 - [x] PDF, web, and JSON ingestion produce correct chunks.
 - [x] Reranking improves retrieval precision.
 - [x] LLM-judge metrics produce meaningful scores.
+
+## Phase 8: DBE Diagnostic Agent (Completed)
+
+Goal: Build a Database Reliability Engineering (DBE) agent capable of diagnostic tool-execution and troubleshooting database issues.
+
+Tasks:
+
+- [x] Create hand-rolled ReAct loop for agent execution.
+- [x] Build tools: `execute_sql`, `execute_bash`, `query_pmm_metrics`.
+- [x] Set up sandbox parsing and command restrictions (safe read-only sql, query parameters, safe bash).
+- [x] Implement alerting notifications (Slack, GChat).
+- [x] Add `GET /v1/dbe/metrics` telemetry endpoint and SRE live metrics dashboard components.
+
+Exit criteria:
+
+- [x] ReAct loop successfully parses actions and generates Root Cause Analysis (RCA) reports.
+- [x] Secure sandbox prevents write operations and limits bash command execution.
+- [x] SRE Dashboard visualizes real-time metrics and supports triggerable diagnostics.
+
+## Phase 9: RAG ↔ DBE Integration (In Progress)
+
+Goal: Connect the RAG system and the DBE Agent to establish a unified SRE intelligence loop.
+
+Tasks:
+
+- [ ] Retrieve relevant runbook chunks from the RAG search service on alert/incident queries.
+- [ ] Pass runbook context into the DBE Agent system prompt (Runbook-Augmented Diagnostics).
+- [ ] Record DBE diagnostic findings, thoughts, and RCA reports back as Operational Memory events.
+- [ ] Index RCA reports as markdown documents in the RAG pipeline to enable semantic searching of past incident resolutions.
+
+Exit criteria:
+
+- [ ] Runbook context dynamically guides the DBE Agent's troubleshooting path.
+- [ ] Completed diagnostic sessions feed back into both pgvector document indexes and operational memory.
+
+## Phase 10: Agent Framework Migration (Future)
+
+Goal: Migrate hand-rolled agent ReAct logic to Google ADK (Agent Development Kit).
+
+Tasks:
+
+- [ ] Define tools using ADK `FunctionTool` declarations.
+- [ ] Implement ADK `Agent` to manage LLM interactions and tool calling.
+- [ ] Remove legacy regex-based thought/action parsing.
+

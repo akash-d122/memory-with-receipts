@@ -13,6 +13,7 @@ dependencies = [
     "fastapi>=0.136.1",
     "python-multipart>=0.0.18",
     "google-genai>=2.8.0",
+    "google-adk",
     "pgvector>=0.4.2",
     "psycopg[binary]>=3.3.2",
     "pydantic-settings>=2.14.1",

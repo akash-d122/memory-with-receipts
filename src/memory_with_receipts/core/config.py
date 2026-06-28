@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     environment: str = "test"
     log_level: str = "INFO"
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/memory_with_receipts"
+    slack_webhook_url: str = ""
+    gchat_webhook_url: str = ""
 
     # LLM provider
     llm_provider: str = "mock"

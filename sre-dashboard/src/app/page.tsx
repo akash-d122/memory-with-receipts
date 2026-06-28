@@ -99,7 +99,7 @@ interface AskResponse {
 
 export default function SreDashboard() {
   // Navigation & Config States
-  const [activeTab, setActiveTab] = useState<"overview" | "incidents" | "rag" | "simulator">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "incidents" | "rag" | "simulator" | "dbe">("overview");
   const [apiBase] = useState<string>("http://127.0.0.1:8000");
   const [apiStatus, setApiStatus] = useState<"online" | "offline" | "checking">("checking");
   const [settings, setSettings] = useState<{
@@ -154,6 +154,141 @@ export default function SreDashboard() {
   const [simDescription, setSimDescription] = useState("Replication lag on db-replica-01 has reached 12.4 GB, exceeding critical SLA of 1 GB.");
   const [simTeam, setSimTeam] = useState("sre-ops");
   const [consoleLog, setConsoleLog] = useState("");
+
+  // DBE diagnostics states
+  const [dbeLoading, setDbeLoading] = useState(false);
+  const [dbeLogs, setDbeLogs] = useState<{ step_number: number; thought: string; action_tool: string | null; action_argument: string | null; observation: string | null }[]>([]);
+  const [dbeRca, setDbeRca] = useState("");
+  const [dbeSlackSent, setDbeSlackSent] = useState(false);
+  const [dbeGchatSent, setDbeGchatSent] = useState(false);
+  const [dbeError, setDbeError] = useState<string | null>(null);
+  const [selectedDbeAlert, setSelectedDbeAlert] = useState("PostgreSQLReplicationLagCritical");
+  const [dbeRunbookContext, setDbeRunbookContext] = useState<string[]>([]);
+  const [dbeMemoryId, setDbeMemoryId] = useState<string | null>(null);
+  const [dbeDocumentId, setDbeDocumentId] = useState<string | null>(null);
+
+  // DBE Live Telemetry States
+  const [metricsTab, setMetricsTab] = useState<"agent" | "metrics">("agent");
+  const [liveMetrics, setLiveMetrics] = useState<{
+    database_name: string;
+    active_connections: number;
+    idle_connections: number;
+    total_connections: number;
+    max_connections: number;
+    lock_count: number;
+    blocked_connections: number;
+    cache_hit_ratio: number;
+    db_size_bytes: number;
+    xact_commit: number;
+    xact_rollback: number;
+    timestamp: string;
+  } | null>(null);
+  const [autoRefreshMetrics, setAutoRefreshMetrics] = useState(true);
+  const [metricsHistory, setMetricsHistory] = useState<{
+    timestamps: string[];
+    connections: number[];
+    locks: number[];
+    commits: number[];
+  }>({
+    timestamps: [],
+    connections: [],
+    locks: [],
+    commits: [],
+  });
+
+  const runDbeDiagnostics = async (alertName: string) => {
+    if (!alertName) return;
+    setDbeLoading(true);
+    setDbeLogs([]);
+    setDbeRca("");
+    setDbeError(null);
+    setDbeSlackSent(false);
+    setDbeGchatSent(false);
+    setDbeRunbookContext([]);
+    setDbeMemoryId(null);
+    setDbeDocumentId(null);
+
+    try {
+      const res = await fetch(`${apiBase}/v1/dbe/diagnose`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: alertName, max_steps: 5 }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setDbeLogs(data.steps || []);
+        setDbeRca(data.rca_report || "");
+        setDbeSlackSent(data.slack_sent);
+        setDbeGchatSent(data.gchat_sent);
+        setDbeRunbookContext(data.runbook_context_used || []);
+        setDbeMemoryId(data.memory_id || null);
+        setDbeDocumentId(data.document_id || null);
+        if (!data.is_successful) {
+          setDbeError(data.error_message || "Agent diagnostics timed out.");
+        }
+        Swal.fire({
+          title: "Diagnosis Complete",
+          text: "RCA report generated and notification channels alerted.",
+          icon: "success",
+          background: "#121b2d",
+          color: "#f8fafc",
+          confirmButtonColor: "#00f2fe",
+        });
+      } else {
+        setDbeError(data.detail?.message || "Diagnostics failed.");
+        Swal.fire("Diagnostics failed", data.detail?.message || "Internal server error", "error");
+      }
+    } catch (err) {
+      console.error(err);
+      setDbeError("FastAPI backend unreachable.");
+      Swal.fire("Connection Error", "Unable to reach FastAPI backend", "error");
+    } finally {
+      setDbeLoading(false);
+    }
+  };
+
+  const fetchLiveMetrics = async () => {
+    try {
+      const res = await fetch(`${apiBase}/v1/dbe/metrics`);
+      if (res.ok) {
+        const data = await res.json();
+        setLiveMetrics(data);
+
+        // Keep last 12 samples
+        setMetricsHistory((prev) => {
+          const time = DateTime.fromISO(data.timestamp).toFormat("HH:mm:ss");
+          const nextTimestamps = [...prev.timestamps, time].slice(-12);
+          const nextConnections = [...prev.connections, data.total_connections].slice(-12);
+          const nextLocks = [...prev.locks, data.lock_count].slice(-12);
+          const nextCommits = [...prev.commits, data.xact_commit].slice(-12);
+          return {
+            timestamps: nextTimestamps,
+            connections: nextConnections,
+            locks: nextLocks,
+            commits: nextCommits,
+          };
+        });
+      }
+    } catch (err) {
+      console.error("Failed to fetch live database metrics", err);
+    }
+  };
+
+  // Metrics periodic sync
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (activeTab === "dbe" && metricsTab === "metrics") {
+      fetchLiveMetrics();
+      if (autoRefreshMetrics) {
+        interval = setInterval(fetchLiveMetrics, 5000);
+      }
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, metricsTab, autoRefreshMetrics]);
 
   // Refs for Animations
   const pageContainerRef = useRef<HTMLDivElement>(null);
@@ -475,8 +610,8 @@ export default function SreDashboard() {
       {
         label: "Primary DB Load (%)",
         data: [42, 48, 55, 78, 92, 45, 38],
-        borderColor: "#00f2fe",
-        backgroundColor: "rgba(0, 242, 254, 0.05)",
+        borderColor: "#94a3b8",
+        backgroundColor: "rgba(148, 163, 184, 0.08)",
         fill: true,
         tension: 0.4,
         borderWidth: 2,
@@ -485,8 +620,8 @@ export default function SreDashboard() {
       {
         label: "Replica Lag (sec)",
         data: [1.2, 1.5, 3.4, 8.9, 12.4, 4.2, 2.1],
-        borderColor: "#9d4edd",
-        backgroundColor: "rgba(157, 78, 221, 0.05)",
+        borderColor: "#cbd5e1",
+        backgroundColor: "rgba(203, 213, 225, 0.08)",
         fill: true,
         tension: 0.4,
         borderWidth: 2,
@@ -501,12 +636,54 @@ export default function SreDashboard() {
       {
         label: "Avg Client Connections",
         data: [210, 230, 290, 310, 480, 190, 180],
-        backgroundColor: "rgba(59, 130, 246, 0.4)",
-        borderColor: "#3b82f6",
+        backgroundColor: "rgba(148, 163, 184, 0.15)",
+        borderColor: "#94a3b8",
         borderWidth: 1,
         borderRadius: 4,
       },
     ],
+  };
+
+  const liveTelemetryChartData = {
+    labels: metricsHistory.timestamps.length > 0 ? metricsHistory.timestamps : ["-"],
+    datasets: [
+      {
+        label: "Database Connections",
+        data: metricsHistory.connections.length > 0 ? metricsHistory.connections : [0],
+        borderColor: "#94a3b8",
+        backgroundColor: "rgba(148, 163, 184, 0.08)",
+        fill: true,
+        tension: 0.4,
+        borderWidth: 2.5,
+        pointRadius: 2,
+      },
+      {
+        label: "Active Locks",
+        data: metricsHistory.locks.length > 0 ? metricsHistory.locks : [0],
+        borderColor: "#cbd5e1",
+        backgroundColor: "rgba(203, 213, 225, 0.08)",
+        fill: true,
+        tension: 0.4,
+        borderWidth: 2.5,
+        pointRadius: 2,
+      }
+    ]
+  };
+
+  const transactionThroughputData = {
+    labels: metricsHistory.timestamps.length > 0 ? metricsHistory.timestamps : ["-"],
+    datasets: [
+      {
+        label: "Commits",
+        data: metricsHistory.commits.length > 0 ? metricsHistory.commits : [0],
+        borderColor: "#10b981",
+        backgroundColor: "rgba(16, 185, 129, 0.05)",
+        fill: true,
+        tension: 0.4,
+        borderWidth: 2,
+        pointRadius: 2,
+      }
+    ]
   };
 
   // Floating UI citation hover config — wired to citation index state
@@ -532,7 +709,7 @@ export default function SreDashboard() {
         <div className="flex flex-col gap-8 w-full">
           {/* LOGO */}
           <div className="flex items-center gap-3 px-2">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-[#00f2fe] to-[#9d4edd] flex items-center justify-center shadow-[0_0_15px_rgba(0,242,254,0.3)] shrink-0">
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-[#475569] to-[#94a3b8] border border-white/5 flex items-center justify-center shrink-0">
               <Activity className="h-5 w-5 text-white" />
             </div>
             <span className="hidden md:block font-bold text-lg bg-clip-text text-transparent bg-gradient-to-r from-[#f8fafc] to-[#94a3b8]">
@@ -547,13 +724,14 @@ export default function SreDashboard() {
               { id: "incidents" as const, icon: <AlertTriangle className="h-5 w-5 shrink-0" />, label: "Active Incidents" },
               { id: "rag" as const, icon: <Search className="h-5 w-5 shrink-0" />, label: "Unified RAG Studio" },
               { id: "simulator" as const, icon: <Terminal className="h-5 w-5 shrink-0" />, label: "Ingestion Simulator" },
+              { id: "dbe" as const, icon: <Terminal className="h-5 w-5 shrink-0" />, label: "DBE Diagnostics" },
             ].map((item) => (
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
                 className={`flex items-center gap-3 py-3 px-3 rounded-lg text-sm transition-all duration-300 w-full ${
                   activeTab === item.id
-                    ? "bg-gradient-to-r from-[rgba(0,242,254,0.1)] to-[rgba(157,78,221,0.05)] text-[#00f2fe] border-l-2 border-[#00f2fe]"
+                    ? "bg-white/[0.04] text-white border-l-2 border-slate-400"
                     : "text-[#94a3b8] hover:bg-white/5 hover:text-white"
                 }`}
               >
@@ -569,7 +747,7 @@ export default function SreDashboard() {
           <div className="hidden md:flex flex-col gap-1.5 p-3 rounded-lg bg-white/[0.03] border border-white/5 text-[0.8rem]">
             <div className="flex items-center justify-between text-[#94a3b8]">
               <span>RAG Provider</span>
-              <span className="text-[#00f2fe]">{settings.llm_provider}</span>
+              <span className="text-[#cbd5e1]">{settings.llm_provider}</span>
             </div>
             <div className="flex items-center justify-between text-[#94a3b8]">
               <span>Dim size</span>
@@ -587,24 +765,25 @@ export default function SreDashboard() {
       {/* MAIN CONTENT VIEWPORT */}
       <main className="flex-1 flex flex-col overflow-hidden relative">
         {/* HEADER BAR */}
-        <header className="dashboard-header flex items-center justify-between px-6 py-4 border-b border-[rgba(255,255,255,0.06)] bg-[#0a0e1a]/40 backdrop-blur-xl z-10 shrink-0">
+        <header className="dashboard-header flex items-center justify-between px-6 py-4 border-b border-[rgba(255,255,255,0.06)] bg-[#131722]/40 backdrop-blur-xl z-10 shrink-0">
           <div className="flex items-center gap-4">
             <h1 className="text-xl font-semibold text-white tracking-wide">
               {activeTab === "overview" && "Operational Overview"}
               {activeTab === "incidents" && "Operational Memory Alert Feed"}
               {activeTab === "rag" && "Cross-Vertical RAG Studio"}
               {activeTab === "simulator" && "Playbook Ingestion & Webhook Simulator"}
+              {activeTab === "dbe" && "DBE Diagnostic Agent Console"}
             </h1>
           </div>
 
           {/* BACKEND API STATUS BAR */}
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 bg-[#0e1628] border border-[rgba(255,255,255,0.06)] rounded-full px-3 py-1 text-xs">
+            <div className="flex items-center gap-1.5 bg-[#1b2230] border border-[rgba(255,255,255,0.06)] rounded-full px-3 py-1 text-xs">
               <span className="text-[#94a3b8]">API backend:</span>
               <span className="font-mono text-white select-all">{apiBase}</span>
             </div>
 
-            <div className="flex items-center gap-2 bg-[#0e1628] border border-[rgba(255,255,255,0.06)] rounded-full px-3 py-1 text-xs">
+            <div className="flex items-center gap-2 bg-[#1b2230] border border-[rgba(255,255,255,0.06)] rounded-full px-3 py-1 text-xs">
               {apiStatus === "checking" && (
                 <>
                   <RefreshCw className="h-3 w-3 text-amber-400 animate-spin" />
@@ -644,12 +823,12 @@ export default function SreDashboard() {
                 <ContainerScroll
                   titleComponent={
                     <div className="max-w-2xl mx-auto text-center mb-6">
-                      <span className="px-3 py-1 rounded-full text-xs font-semibold tracking-wider text-[#00f2fe] bg-[rgba(0,242,254,0.1)] uppercase">
+                      <span className="px-3 py-1 rounded-full text-xs font-semibold tracking-wider text-[#cbd5e1] bg-white/[0.04] border border-white/5 uppercase">
                         SRE Intelligent Platform
                       </span>
                       <h2 className="text-4xl md:text-6xl font-bold tracking-tight text-white mt-4 leading-tight">
                         Visualizing System <br />
-                        <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#00f2fe] to-[#9d4edd]">
+                        <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#f1f5f9] to-[#94a3b8]">
                           Operational Memory
                         </span>
                       </h2>
@@ -660,7 +839,7 @@ export default function SreDashboard() {
                   }
                 >
                   {/* Dashboard Mockup Inside 3D Scroll Container */}
-                  <div className="h-full w-full bg-[#0a101f] p-6 flex flex-col gap-6 overflow-hidden rounded-2xl border border-white/5 relative">
+                  <div className="h-full w-full bg-[#1b2230] p-6 flex flex-col gap-6 overflow-hidden rounded-2xl border border-white/5 relative">
                     <div className="flex justify-between items-center border-b border-white/5 pb-4">
                       <div className="flex gap-2">
                         <span className="w-3 h-3 rounded-full bg-rose-500"></span>
@@ -681,7 +860,7 @@ export default function SreDashboard() {
                       </div>
                       <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col justify-between">
                         <span className="text-xs text-[#94a3b8]">Verifiable Queries</span>
-                        <span className="text-2xl font-bold text-[#00f2fe] mt-2">{metrics.queriesCount}</span>
+                        <span className="text-2xl font-bold text-white mt-2">{metrics.queriesCount}</span>
                       </div>
                     </div>
 
@@ -940,7 +1119,7 @@ export default function SreDashboard() {
                         onClick={() => setSearchMode("search")}
                         className={`text-xs py-1.5 rounded-md font-medium transition-all ${
                           searchMode === "search"
-                            ? "bg-[rgba(0,242,254,0.1)] text-[#00f2fe] border border-[rgba(0,242,254,0.2)]"
+                            ? "bg-white/[0.06] text-white border border-white/10"
                             : "text-[#94a3b8] hover:text-white"
                         }`}
                       >
@@ -951,7 +1130,7 @@ export default function SreDashboard() {
                         onClick={() => setSearchMode("ask")}
                         className={`text-xs py-1.5 rounded-md font-medium transition-all ${
                           searchMode === "ask"
-                            ? "bg-[rgba(157,78,221,0.1)] text-[#9d4edd] border border-[rgba(157,78,221,0.2)]"
+                            ? "bg-white/[0.06] text-white border border-white/10"
                             : "text-[#94a3b8] hover:text-white"
                         }`}
                       >
@@ -981,7 +1160,7 @@ export default function SreDashboard() {
                       max="10"
                       value={topK}
                       onChange={(e) => setTopK(parseInt(e.target.value))}
-                      className="w-full accent-[#00f2fe]"
+                      className="w-full accent-[#cbd5e1]"
                     />
                   </div>
 
@@ -1163,11 +1342,11 @@ export default function SreDashboard() {
 
                 <form onSubmit={handleFileUpload} className="flex flex-col gap-4">
                   <label className="flex flex-col items-center justify-center border border-dashed border-white/20 rounded-xl p-8 bg-black/20 hover:bg-white/[0.03] cursor-pointer transition-colors relative">
-                    <Upload className="h-10 w-10 text-[#00f2fe] mb-3" />
+                    <Upload className="h-10 w-10 text-slate-400 mb-3" />
                     {simFile ? (
                       <div className="text-center">
                         <span className="text-sm font-semibold text-white block truncate max-w-xs">{simFile.name}</span>
-                        <span className="text-[11px] text-[#00f2fe] mt-1 block">
+                        <span className="text-[11px] text-slate-300 mt-1 block">
                           {(simFile.size / 1024).toFixed(1)} KB - Click to replace
                         </span>
                       </div>
@@ -1310,7 +1489,7 @@ export default function SreDashboard() {
               <div className="glass-panel p-6 md:col-span-2 flex flex-col gap-4" data-aos="fade-up">
                 <div className="flex justify-between items-center border-b border-white/5 pb-3">
                   <div className="flex items-center gap-2">
-                    <Terminal className="h-4 w-4 text-[#00f2fe]" />
+                    <Terminal className="h-4 w-4 text-slate-400" />
                     <h2 className="text-xs font-semibold text-white uppercase tracking-wider">Webhook API Console Logs</h2>
                   </div>
                   <button
@@ -1325,6 +1504,490 @@ export default function SreDashboard() {
                   {consoleLog || "Simulator webhook logs will render here in real-time JSON format..."}
                 </pre>
               </div>
+            </div>
+          )}
+          {/* TAB 5: DBE DIAGNOSTICS */}
+          {activeTab === "dbe" && (
+            <div className="max-w-5xl mx-auto flex flex-col gap-6 animate-fade-in">
+              {/* DBE Sub-tab Selector */}
+              <div className="flex justify-between items-center border-b border-white/5 pb-4">
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => setMetricsTab("agent")}
+                    className={`text-sm font-semibold pb-2 border-b-2 transition-all ${
+                      metricsTab === "agent"
+                        ? "text-white border-slate-400"
+                        : "text-[#94a3b8] border-transparent hover:text-white"
+                    }`}
+                  >
+                    Diagnostic Agent Console
+                  </button>
+                  <button
+                    onClick={() => setMetricsTab("metrics")}
+                    className={`text-sm font-semibold pb-2 border-b-2 transition-all ${
+                      metricsTab === "metrics"
+                        ? "text-white border-slate-400"
+                        : "text-[#94a3b8] border-transparent hover:text-white"
+                    }`}
+                  >
+                    Live Database Telemetry
+                  </button>
+                </div>
+
+                {metricsTab === "metrics" && (
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 text-xs text-[#94a3b8]">
+                      <span>Auto Refresh:</span>
+                      <button
+                        onClick={() => setAutoRefreshMetrics(!autoRefreshMetrics)}
+                        className={`px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase transition-all ${
+                          autoRefreshMetrics
+                            ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                            : "bg-white/5 text-[#94a3b8] border border-white/5"
+                        }`}
+                      >
+                        {autoRefreshMetrics ? "ON" : "OFF"}
+                      </button>
+                    </div>
+                    <button
+                      onClick={fetchLiveMetrics}
+                      className="glass-button text-xs py-1.5 px-3"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Force Sync
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Agent Console view */}
+              {metricsTab === "agent" && (
+                <div className="flex flex-col gap-6 animate-fade-in">
+                  <div className="glass-panel p-6 flex flex-col gap-6">
+                    <div>
+                      <h2 className="text-md font-semibold text-white">DBE Diagnostic Agent</h2>
+                      <p className="text-xs text-[#94a3b8] mt-1">Select an active incident or trigger query to launch ReAct agentic diagnostics</p>
+                    </div>
+
+                    <div className="flex gap-4 items-end">
+                      <div className="flex-1 flex flex-col gap-1.5">
+                        <label className="text-xs text-[#94a3b8] font-medium">Select Firing Incident / Alert Query</label>
+                        <select
+                          className="glass-input text-xs"
+                          value={selectedDbeAlert}
+                          onChange={(e) => setSelectedDbeAlert(e.target.value)}
+                        >
+                          {incidents.length > 0 ? (
+                            incidents.map((inc) => (
+                              <option key={inc.memory_id} value={inc.provenance?.[0]?.title || inc.summary}>
+                                {inc.summary} ({inc.provenance?.[0]?.severity || "critical"})
+                              </option>
+                            ))
+                          ) : (
+                            <>
+                              <option value="PostgreSQLReplicationLagCritical">PostgreSQLReplicationLagCritical (Simulation Alert)</option>
+                              <option value="PostgreSQLMaxConnectionsReached">PostgreSQLMaxConnectionsReached (Simulation Alert)</option>
+                              <option value="RDSCPUUtilizationHigh">RDSCPUUtilizationHigh (Simulation Alert)</option>
+                            </>
+                          )}
+                        </select>
+                      </div>
+
+                      <button
+                        onClick={() => runDbeDiagnostics(selectedDbeAlert)}
+                        className="glass-button text-sm h-fit py-2.5 px-6"
+                        disabled={dbeLoading}
+                      >
+                        {dbeLoading ? (
+                          <span className="flex items-center gap-2">
+                            <RefreshCw className="h-4 w-4 animate-spin" />
+                            Running ReAct Diagnostics...
+                          </span>
+                        ) : (
+                          "Run Diagnostics"
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Steps Console / Log output */}
+                  {(dbeLoading || dbeLogs.length > 0) && (
+                    <div className="glass-panel p-6 flex flex-col gap-4">
+                      <div className="flex justify-between items-center border-b border-white/5 pb-3">
+                        <div className="flex items-center gap-2">
+                          <Terminal className="h-4 w-4 text-slate-400" />
+                          <h2 className="text-xs font-semibold text-white uppercase tracking-wider">Diagnostic Execution Log</h2>
+                        </div>
+                        {dbeLoading && (
+                          <span className="text-xs text-slate-400 animate-pulse">Agent is thinking and querying tools...</span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-col gap-4 max-h-[400px] overflow-y-auto pr-2">
+                        {dbeLogs.map((log) => (
+                          <div key={log.step_number} className="bg-black/30 border border-white/5 p-4 rounded-xl flex flex-col gap-2 font-mono text-xs">
+                            <div className="flex justify-between text-[11px] text-white font-bold border-b border-white/5 pb-1">
+                              <span>STEP {log.step_number}</span>
+                              <span>{log.action_tool ? `Tool: ${log.action_tool}` : "Finalization"}</span>
+                            </div>
+                            <div className="text-white">
+                              <span className="text-[#94a3b8] font-bold">Thought:</span> {log.thought}
+                            </div>
+                            {log.action_argument && (
+                              <div className="text-slate-300 truncate">
+                                <span className="text-[#94a3b8] font-bold">Arguments:</span> {log.action_argument}
+                              </div>
+                            )}
+                            {log.observation && (
+                              <div className="mt-2 bg-black/50 border border-white/5 p-3 rounded-lg text-emerald-400 select-all whitespace-pre overflow-x-auto">
+                                <span className="text-[#94a3b8] font-bold block mb-1">Observation Output:</span>
+                                {log.observation}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+
+                        {dbeLoading && dbeLogs.length === 0 && (
+                          <div className="text-center py-6 text-xs text-[#94a3b8] font-mono animate-pulse">
+                            Initiating diagnostics agent...
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Diagnosed RCA Report */}
+                  {dbeRca && (
+                    <div className="glass-panel p-6 flex flex-col gap-6">
+                      <div className="flex justify-between items-center border-b border-white/5 pb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
+                          <span className="text-xs font-semibold text-white uppercase tracking-wider">Root Cause Analysis (RCA) Report</span>
+                        </div>
+                        <div className="flex gap-2">
+                          {dbeSlackSent && (
+                            <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-mono">
+                              Slack Notified
+                            </span>
+                          )}
+                          {dbeGchatSent && (
+                            <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-mono">
+                              GChat Notified
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="text-sm text-[#94a3b8] leading-relaxed whitespace-pre-wrap select-text font-sans prose prose-invert max-w-none">
+                        {dbeRca}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Referenced Runbooks & Ingestion Receipts Grid */}
+                  {dbeRca && (dbeRunbookContext.length > 0 || dbeMemoryId || dbeDocumentId) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6" data-aos="fade-up">
+                      {/* Left: Referenced Runbook Knowledge */}
+                      <div className="glass-panel p-6 flex flex-col gap-4">
+                        <div className="border-b border-white/5 pb-3">
+                          <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Referenced Runbook Knowledge</h3>
+                        </div>
+                        {dbeRunbookContext.length > 0 ? (
+                          <div className="flex flex-col gap-3 max-h-[300px] overflow-y-auto pr-1">
+                            {dbeRunbookContext.map((chunk, idx) => (
+                              <div key={idx} className="p-3 bg-black/10 rounded-lg border border-white/5 text-xs text-[#94a3b8] font-mono leading-relaxed select-text whitespace-pre-wrap">
+                                {chunk}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-xs text-[#64748b] italic p-2">
+                            No matching runbook playbook knowledge was referenced for this alert category.
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Right: Operational Ingestion Receipts */}
+                      <div className="glass-panel p-6 flex flex-col gap-4">
+                        <div className="border-b border-white/5 pb-3">
+                          <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Ingestion Status / Receipts</h3>
+                        </div>
+                        <p className="text-xs text-[#94a3b8] leading-relaxed">
+                          This root cause analysis (RCA) report and diagnostic sequence have been ingested back into the operational memory and document index.
+                        </p>
+                        
+                        <div className="flex flex-col gap-4 mt-2">
+                          {/* Memory ID Chip */}
+                          <div className="flex flex-col gap-1.5">
+                            <span className="text-[11px] font-semibold text-white uppercase tracking-wider">Operational Memory Receipt</span>
+                            {dbeMemoryId ? (
+                              <div className="flex items-center justify-between gap-2 p-2 bg-black/25 border border-white/5 rounded-lg">
+                                <button
+                                  onClick={() => {
+                                    setActiveTab("rag");
+                                    setSelectedSourceType("operational-memory");
+                                    setSearchQuery(dbeMemoryId);
+                                    setSearchMode("search");
+                                  }}
+                                  className="text-xs text-[#94a3b8] hover:text-white font-mono font-medium text-left truncate flex-1 hover:underline cursor-pointer"
+                                  title="Click to lookup in Unified RAG Studio"
+                                >
+                                  {dbeMemoryId}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(dbeMemoryId);
+                                    Swal.fire({
+                                      title: "Copied!",
+                                      text: "Memory ID copied to clipboard",
+                                      icon: "success",
+                                      toast: true,
+                                      position: "top-end",
+                                      showConfirmButton: false,
+                                      timer: 1500,
+                                      background: "#1e2535",
+                                      color: "#f1f5f9",
+                                    });
+                                  }}
+                                  className="p-1 text-[#64748b] hover:text-[#94a3b8] rounded transition-colors"
+                                  title="Copy Memory ID"
+                                >
+                                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                                  </svg>
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-[#64748b] italic">Not ingested</span>
+                            )}
+                          </div>
+
+                          {/* Document ID Chip */}
+                          <div className="flex flex-col gap-1.5">
+                            <span className="text-[11px] font-semibold text-white uppercase tracking-wider">Document Index Receipt</span>
+                            {dbeDocumentId ? (
+                              <div className="flex items-center justify-between gap-2 p-2 bg-black/25 border border-white/5 rounded-lg">
+                                <button
+                                  onClick={() => {
+                                    setActiveTab("rag");
+                                    setSelectedSourceType("markdown");
+                                    setSearchQuery(dbeDocumentId);
+                                    setSearchMode("search");
+                                  }}
+                                  className="text-xs text-[#94a3b8] hover:text-white font-mono font-medium text-left truncate flex-1 hover:underline cursor-pointer"
+                                  title="Click to lookup in Unified RAG Studio"
+                                >
+                                  {dbeDocumentId}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(dbeDocumentId);
+                                    Swal.fire({
+                                      title: "Copied!",
+                                      text: "Document ID copied to clipboard",
+                                      icon: "success",
+                                      toast: true,
+                                      position: "top-end",
+                                      showConfirmButton: false,
+                                      timer: 1500,
+                                      background: "#1e2535",
+                                      color: "#f1f5f9",
+                                    });
+                                  }}
+                                  className="p-1 text-[#64748b] hover:text-[#94a3b8] rounded transition-colors"
+                                  title="Copy Document ID"
+                                >
+                                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                                  </svg>
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-[#64748b] italic">Not ingested</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {dbeError && (
+                    <div className="glass-panel p-5 bg-rose-500/5 border-rose-500/20 flex gap-3 text-xs text-rose-400">
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                      <div>
+                        <div className="font-bold">Diagnostics Execution Failure</div>
+                        <div className="mt-1">{dbeError}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Live Telemetry monitor view */}
+              {metricsTab === "metrics" && (
+                <div className="flex flex-col gap-6 animate-fade-in">
+                  {liveMetrics ? (
+                    <>
+                      {/* Overview status bar */}
+                      <div className="glass-panel p-5 flex items-center justify-between bg-white/[0.01]">
+                        <div className="flex items-center gap-3">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                          </span>
+                          <div>
+                            <span className="text-[10px] text-[#94a3b8] uppercase font-bold tracking-wider">Catalog Target</span>
+                            <h3 className="text-sm font-semibold text-white font-mono">{liveMetrics.database_name}</h3>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-6">
+                          <div>
+                            <span className="text-[10px] text-[#94a3b8] uppercase font-bold tracking-wider block text-right">Database Size</span>
+                            <span className="text-sm font-bold text-white">{(liveMetrics.db_size_bytes / (1024 * 1024)).toFixed(2)} MB</span>
+                          </div>
+                          <div className="border-l border-white/5 pl-6">
+                            <span className="text-[10px] text-[#94a3b8] uppercase font-bold tracking-wider block text-right">Last Sample</span>
+                            <span className="text-xs font-mono text-[#00f2fe]">{DateTime.fromISO(liveMetrics.timestamp).toFormat("HH:mm:ss")}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Metrics Card Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                        {/* 1. Connection Limits */}
+                        <div className="glass-panel p-5 flex flex-col justify-between min-h-[120px] relative overflow-hidden group">
+                          <div>
+                            <span className="text-[10px] font-bold text-[#94a3b8] uppercase tracking-wider">Connections</span>
+                            <div className="flex items-baseline gap-2 mt-2">
+                              <span className="text-3xl font-extrabold text-white">{liveMetrics.total_connections}</span>
+                              <span className="text-xs text-[#94a3b8]">/ {liveMetrics.max_connections} max</span>
+                            </div>
+                          </div>
+                          <div className="mt-4">
+                            <div className="flex justify-between text-[10px] text-[#94a3b8] mb-1">
+                              <span>Connection pool usage</span>
+                              <span>{Math.round((liveMetrics.total_connections / liveMetrics.max_connections) * 100)}%</span>
+                            </div>
+                            <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden border border-white/5">
+                              <div
+                                className={`h-full rounded-full transition-all duration-500 ${
+                                  (liveMetrics.total_connections / liveMetrics.max_connections) > 0.8
+                                    ? "bg-rose-500"
+                                    : (liveMetrics.total_connections / liveMetrics.max_connections) > 0.5
+                                    ? "bg-amber-500"
+                                    : "bg-emerald-500"
+                                }`}
+                                style={{ width: `${Math.min(100, (liveMetrics.total_connections / liveMetrics.max_connections) * 100)}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 2. Active vs Idle */}
+                        <div className="glass-panel p-5 flex flex-col justify-between min-h-[120px]">
+                          <div>
+                            <span className="text-[10px] font-bold text-[#94a3b8] uppercase tracking-wider">Activity Distribution</span>
+                            <div className="grid grid-cols-2 gap-4 mt-2">
+                              <div>
+                                <span className="text-xs text-[#94a3b8] block">Active Clients</span>
+                                <span className="text-xl font-bold text-[#00f2fe]">{liveMetrics.active_connections}</span>
+                              </div>
+                              <div>
+                                <span className="text-xs text-[#94a3b8] block">Idle Clients</span>
+                                <span className="text-xl font-bold text-white">{liveMetrics.idle_connections}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-[#94a3b8] mt-3">Active vs Idle backends in pg_stat_activity</p>
+                        </div>
+
+                        {/* 3. Cache Hit Ratio */}
+                        <div className="glass-panel p-5 flex flex-col justify-between min-h-[120px] relative overflow-hidden group">
+                          <div>
+                            <span className="text-[10px] font-bold text-[#94a3b8] uppercase tracking-wider">Cache Hit Rate</span>
+                            <h2 className="text-3xl font-extrabold text-emerald-400 mt-2">{(liveMetrics.cache_hit_ratio * 100).toFixed(2)}%</h2>
+                          </div>
+                          <p className="text-[10px] text-[#94a3b8] mt-3">Shared buffer read efficiency of user tables</p>
+                        </div>
+
+                        {/* 4. Locks & Blocked Connections */}
+                        <div className="glass-panel p-5 flex flex-col justify-between min-h-[120px]">
+                          <div>
+                            <span className="text-[10px] font-bold text-[#94a3b8] uppercase tracking-wider">Locks & Blocks</span>
+                            <div className="grid grid-cols-2 gap-4 mt-2">
+                              <div>
+                                <span className="text-xs text-[#94a3b8] block">Active Locks</span>
+                                <span className="text-xl font-bold text-[#9d4edd]">{liveMetrics.lock_count}</span>
+                              </div>
+                              <div>
+                                <span className="text-xs text-[#94a3b8] block">Blocked Queries</span>
+                                <span className={`text-xl font-bold ${liveMetrics.blocked_connections > 0 ? "text-rose-400 animate-pulse" : "text-white"}`}>
+                                  {liveMetrics.blocked_connections}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-[#94a3b8] mt-3">Active lock handles and waits on db resources</p>
+                        </div>
+                      </div>
+
+                      {/* Charts section */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Live telemetry chart */}
+                        <div className="glass-panel p-6">
+                          <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-4">Connections & Locks Historical Stream</h3>
+                          <div className="h-64">
+                            <Line
+                              data={liveTelemetryChartData}
+                              options={{
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                  legend: {
+                                    labels: { color: "#f8fafc", font: { family: "Outfit", size: 10 } },
+                                  },
+                                },
+                                scales: {
+                                  x: { grid: { display: false }, ticks: { color: "#94a3b8", font: { size: 9 } } },
+                                  y: { grid: { color: "rgba(255,255,255,0.03)" }, ticks: { color: "#94a3b8", font: { size: 9 } } },
+                                },
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Transactions commits throughput chart */}
+                        <div className="glass-panel p-6">
+                          <h3 className="text-xs font-semibold text-white uppercase tracking-wider mb-4">Database Commits Trend</h3>
+                          <div className="h-64">
+                            <Line
+                              data={transactionThroughputData}
+                              options={{
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                  legend: {
+                                    labels: { color: "#f8fafc", font: { family: "Outfit", size: 10 } },
+                                  },
+                                },
+                                scales: {
+                                  x: { grid: { display: false }, ticks: { color: "#94a3b8", font: { size: 9 } } },
+                                  y: { grid: { color: "rgba(255,255,255,0.03)" }, ticks: { color: "#94a3b8", font: { size: 9 } } },
+                                },
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="glass-panel flex flex-col items-center justify-center py-24 gap-4 text-center">
+                      <div className="h-8 w-8 border-2 border-t-transparent border-[#00f2fe] rounded-full animate-spin"></div>
+                      <span className="text-sm text-[#94a3b8]">Synchronizing with database engine...</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </section>

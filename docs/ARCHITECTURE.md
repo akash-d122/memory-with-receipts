@@ -23,31 +23,37 @@ A receipt includes:
 ## High-level components
 
 ```text
-Client / CLI / API caller
+SRE Dashboard (Next.js Frontend)
         |
         v
-FastAPI boundary
+FastAPI Boundary (Backend Router)
         |
         +-- Operational memory vertical        +-- Document RAG vertical
         |     +-> event ingestion               |     +-> document ingestion
         |     +-> deterministic evidence        |     |     +-> parsers (text/md/pdf/web)
-        |     |   extraction                    |     |     +-> chunking (fixed/structure)
+        |     |   extraction                    |     |     +-> chunking (fixed/structure/semantic)
         |     +-> memory creation/update        |     |     +-> embedding (local/API)
         |     +-> provenance receipts           |     |     +-> storage (documents/chunks)
-        |     +-> deterministic retrieval       |     |
-        |     +-> reason codes                  |     +-> hybrid retrieval
-        |                                       |     |     +-> vector search (pgvector)
-        +-- Generation service                  |     |     +-> keyword search (tsvector)
-        |     +-> context assembly              |     |     +-> RRF fusion
-        |     +-> LLM prompt construction       |     |     +-> metadata filters
-        |     +-> citation extraction           |     |     +-> receipt construction
-        |     +-> receipt block                 |     |
-        |                                       |     +-> reranking (optional)
-        +-- Evaluation framework                |
-              +-> golden datasets               +-- Shared
-              +-> deterministic metrics               +-> embeddings (ingestion + query)
-              +-> regression tracking                 +-> provider interfaces
-              +-> evaluation reports                  +-> structured logging
+        |     |                                 |
+        |     +-> deterministic retrieval       |     +-> hybrid retrieval
+        |     +-> reason codes                  |     |     +-> vector search (pgvector)
+        |                                       |     |     +-> keyword search (tsvector)
+        |                                       |     |     +-> RRF fusion
+        |                                       |     |     +-> metadata filters
+        |                                       |     |     +-> receipt construction
+        |                                       |     |
+        +-- DBE Diagnostic Agent (ReAct / ADK)  |     +-> reranking (cross-encoder)
+        |     +-> tool execution                |
+        |     |   (sql/bash/metrics)            +-- Generation service
+        |     +-> sandbox parsing               |     +-> context assembly
+        |     +-> Slack / GChat notification    |     +-> LLM prompt construction
+        |                                       |     +-> citation extraction
+        +-- Evaluation framework                |     +-> receipt block
+              +-> golden datasets               |
+              +-> deterministic metrics         +-- Shared
+              +-> regression tracking                 +-> embeddings (ingestion + query)
+              +-> evaluation reports                  +-> provider interfaces
+                                                      +-> structured logging
 
 PostgreSQL + pgvector
         +-> source_records, evidence_records    (operational memory)
@@ -340,11 +346,11 @@ Later add:
 - No Kubernetes.
 - No background queue initially.
 - No streaming responses.
-- No multi-agent orchestration yet.
+- Single-agent setup: Only the DBE Diagnostic Agent is supported, not general multi-agent systems.
 - No automatic contradiction detection in v1.
 - No complex permission model in v1.
 - No separate vector database in v1.
-- No LLM-based fact extraction until schema and retrieval tests are stable.
+- No LLM-based fact extraction in the core pipeline (operational memory extraction remains deterministic).
 
 ## What not to build yet
 
@@ -352,12 +358,13 @@ Later add:
 - OAuth.
 - Graph database.
 - Agent marketplace integrations.
-- Complex UI.
+- Enterprise portals (SRE Dashboard is focused solely on metrics and diagnostics).
 - Distributed tracing stack.
 - Async job orchestration.
 - Continuous learning loop.
 - Autonomous web ingestion.
 - Expensive evaluation harness.
+
 
 ## Critical review
 

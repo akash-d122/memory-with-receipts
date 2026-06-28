@@ -15,6 +15,8 @@ from memory_with_receipts.api.routes.health import router as health_router
 from memory_with_receipts.api.routes.ingest import router as ingest_router
 from memory_with_receipts.api.routes.operational_memory import router as operational_memory_router
 from memory_with_receipts.api.routes.search import router as search_router
+from memory_with_receipts.api.routes.dbe import router as dbe_router
+
 from memory_with_receipts.core.config import Settings
 from memory_with_receipts.core.logging import configure_logging, get_logger
 
@@ -85,6 +87,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(ask_router)
     app.include_router(eval_router)
     app.include_router(ingest_router)
+    app.include_router(dbe_router)
+
 
     # Lazy-init services and RAG session factory on first use
     # Tests override these via app.state or dependency_overrides

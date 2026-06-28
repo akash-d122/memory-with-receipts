@@ -8,45 +8,45 @@
    DESIGN TOKENS / CSS VARIABLES
 ───────────────────────────────────────────── */
 :root {
-  --bg-primary: #0a0e1a;
-  --bg-secondary: #0f1526;
-  --text-primary: #f8fafc;
+  --bg-primary: #131722;
+  --bg-secondary: #1b2230;
+  --text-primary: #f1f5f9;
   --text-secondary: #94a3b8;
-  --text-muted: #475569;
+  --text-muted: #64748b;
 
-  --accent-cyan: #00f2fe;
-  --accent-purple: #9d4edd;
-  --accent-blue: #3b82f6;
+  --accent-cyan: #94a3b8;
+  --accent-purple: #cbd5e1;
+  --accent-blue: #475569;
 
-  --status-critical: #ff4a6b;
+  --status-critical: #ef4444;
   --status-warning: #f59e0b;
   --status-ok: #10b981;
 
-  --glass-bg: rgba(255, 255, 255, 0.03);
-  --glass-bg-hover: rgba(255, 255, 255, 0.06);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-border-active: rgba(255, 255, 255, 0.18);
-  --glass-glow: rgba(0, 242, 254, 0.15);
+  --glass-bg: rgba(27, 34, 48, 0.6);
+  --glass-bg-hover: rgba(27, 34, 48, 0.85);
+  --glass-border: rgba(148, 163, 184, 0.12);
+  --glass-border-active: rgba(148, 163, 184, 0.22);
+  --glass-glow: transparent;
 
   /* shadcn CSS variables */
-  --background: #0a0e1a;
-  --foreground: #f8fafc;
-  --card: #0f1526;
-  --card-foreground: #f8fafc;
-  --popover: #0f1526;
-  --popover-foreground: #f8fafc;
-  --primary: #00f2fe;
-  --primary-foreground: #0a0e1a;
-  --secondary: #1e2a45;
-  --secondary-foreground: #f8fafc;
-  --muted: #1e2a45;
+  --background: #131722;
+  --foreground: #f1f5f9;
+  --card: #1b2230;
+  --card-foreground: #f1f5f9;
+  --popover: #1b2230;
+  --popover-foreground: #f1f5f9;
+  --primary: #cbd5e1;
+  --primary-foreground: #131722;
+  --secondary: #242c3d;
+  --secondary-foreground: #f1f5f9;
+  --muted: #242c3d;
   --muted-foreground: #94a3b8;
-  --accent: #9d4edd;
-  --accent-foreground: #f8fafc;
-  --destructive: #ff4a6b;
-  --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.06);
-  --ring: rgba(0, 242, 254, 0.4);
+  --accent: #94a3b8;
+  --accent-foreground: #f1f5f9;
+  --destructive: #ef4444;
+  --border: rgba(148, 163, 184, 0.12);
+  --input: rgba(148, 163, 184, 0.08);
+  --ring: rgba(148, 163, 184, 0.3);
   --radius: 0.625rem;
 }
 
@@ -74,9 +74,7 @@ body {
   overflow: hidden;
   background-color: var(--bg-primary);
   background-image:
-    radial-gradient(circle at 10% 20%, rgba(157, 78, 221, 0.07) 0%, transparent 40%),
-    radial-gradient(circle at 90% 80%, rgba(0, 242, 254, 0.06) 0%, transparent 40%),
-    radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.03) 0%, transparent 50%);
+    radial-gradient(circle at 50% 50%, rgba(148, 163, 184, 0.02) 0%, transparent 60%);
   color: var(--text-primary);
 }
 
@@ -130,28 +128,24 @@ body {
 .glass-panel-interactive:hover {
   background: var(--glass-bg-hover);
   border-color: var(--glass-border-active);
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 }
 
 .glass-panel-active {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.04);
   border-color: var(--accent-cyan);
-  box-shadow: 0 0 15px var(--glass-glow);
 }
 
 /* ─────────────────────────────────────────────
-   GLOW TEXT UTILITIES
+   GLOW TEXT UTILITIES (Disabled for neutral monochromatic theme)
 ───────────────────────────────────────────── */
 .glow-text-cyan {
-  text-shadow: 0 0 10px rgba(0, 242, 254, 0.6);
 }
 
 .glow-text-purple {
-  text-shadow: 0 0 10px rgba(157, 78, 221, 0.6);
 }
 
 .glow-text-critical {
-  text-shadow: 0 0 10px rgba(255, 74, 107, 0.6);
 }
 
 /* ─────────────────────────────────────────────
@@ -171,7 +165,6 @@ body {
 
 .glass-input:focus {
   border-color: var(--accent-cyan);
-  box-shadow: 0 0 10px rgba(0, 242, 254, 0.15);
   background: rgba(0, 0, 0, 0.35);
 }
 
@@ -185,15 +178,15 @@ body {
    BUTTON
 ───────────────────────────────────────────── */
 .glass-button {
-  background: linear-gradient(135deg, rgba(0, 242, 254, 0.1) 0%, rgba(157, 78, 221, 0.15) 100%);
-  border: 1px solid rgba(0, 242, 254, 0.2);
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 8px;
   color: var(--text-primary);
   padding: 10px 20px;
   font-weight: 500;
   cursor: pointer;
   outline: none;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -203,8 +196,7 @@ body {
 
 .glass-button:hover:not(:disabled) {
   border-color: var(--accent-cyan);
-  background: linear-gradient(135deg, rgba(0, 242, 254, 0.2) 0%, rgba(157, 78, 221, 0.3) 100%);
-  box-shadow: 0 0 15px rgba(0, 242, 254, 0.25);
+  background: rgba(148, 163, 184, 0.15);
   transform: translateY(-1px);
 }
 
